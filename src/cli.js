@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import { NemligApi, todayIso } from "./api.js";
@@ -713,9 +714,28 @@ function checkRuntime(version = process.versions.node) {
   }
 }
 
-// pathToFileURL, not a string template: Windows paths are not valid URL paths.
-const isMain = process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href;
+/**
+ * True when this file was run as the program rather than imported.
+ *
+ * argv[1] must be resolved through realpath first: `npm link` puts a symlink
+ * on PATH, and Node reports the symlink in argv[1] but the resolved target in
+ * import.meta.url. Comparing them directly makes the linked `nemlig` command
+ * exit silently having done nothing.
+ *
+ * pathToFileURL, not a string template: Windows paths are not valid URL paths.
+ */
+function isMainModule(url, argv1) {
+  if (!argv1) return false;
+  let resolved = argv1;
+  try {
+    resolved = realpathSync(argv1);
+  } catch {
+    // Not a real path (a bare name, or removed mid-run); fall back to argv[1].
+  }
+  return url === pathToFileURL(resolved).href;
+}
+
+const isMain = isMainModule(import.meta.url, process.argv[1]);
 
 if (isMain) {
   const fail = (error, code) => {
@@ -732,4 +752,4 @@ if (isMain) {
   }
 }
 
-export const internals = { checkRuntime };
+export const internals = { checkRuntime, isMainModule };

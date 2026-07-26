@@ -43,4 +43,10 @@ jobs:
         with:
           node-version: '22'
       - run: npm link
-      - run: nemlig --help
+      # Assert on output, not just the exit code: a broken isMain check exits
+      # 0 while printing nothing, which is how this job passed a bug through.
+      - name: The linked command actually runs
+        run: |
+          test "$(nemlig --version)" = "$(node -p "require('./package.json').version")"
+          nemlig --help | grep -q "nemlig search"
+          nemlig goma stores | grep -q "REMA 1000"

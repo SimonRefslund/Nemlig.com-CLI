@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   EXIT,
@@ -453,6 +457,31 @@ test("exit codes distinguish usage, auth, and upstream failures", () => {
   assert.equal(exitCodeFor(new NemligApiError("offline")), EXIT.upstream);
   // A bad --store or --sort is the caller's typo, not an upstream failure.
   assert.equal(exitCodeFor(new GomaApiError("bad store", { usage: true })), EXIT.usage);
+});
+
+test("a symlinked bin still counts as the main module", () => {
+  // npm link puts a symlink on PATH; Node reports the symlink in argv[1] but
+  // the resolved target in import.meta.url. Comparing them directly made the
+  // linked `nemlig` command exit 0 having printed nothing at all.
+  const real = fileURLToPath(new URL("../src/cli.js", import.meta.url));
+  const link = path.join(os.tmpdir(), `nemlig-link-test-${process.pid}`);
+  fs.rmSync(link, { force: true });
+  fs.symlinkSync(real, link);
+  try {
+    assert.equal(internals.isMainModule(pathToFileURL(real).href, link), true);
+    assert.equal(internals.isMainModule(pathToFileURL(real).href, real), true);
+    assert.equal(
+      internals.isMainModule(pathToFileURL(real).href, fileURLToPath(new URL("../src/api.js", import.meta.url))),
+      false,
+    );
+  } finally {
+    fs.rmSync(link, { force: true });
+  }
+});
+
+test("a nonexistent argv[1] is not treated as main", () => {
+  assert.equal(internals.isMainModule("file:///x.js", "/definitely/not/here"), false);
+  assert.equal(internals.isMainModule("file:///x.js", undefined), false);
 });
 
 test("an unsupported Node.js release is reported clearly", () => {
