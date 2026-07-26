@@ -33,6 +33,9 @@ nemlig delivery select <tid-id> --yes
 nemlig checkout status                      # mangler der noget?
 ```
 
+Der ligger en præcis vejledning til agenter i [AGENTS.md](AGENTS.md) med
+JSON-formater, exit-koder og færdige opskrifter.
+
 Det sidste skridt kan agenten derimod ikke tage. `checkout open` lægger kurven
 op i din standardbrowser, og betaling, handelsbetingelser og MobilePay klarer
 du selv — efter du har set totalen. Derfor kan du roligt lade en agent gå amok

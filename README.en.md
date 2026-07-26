@@ -27,6 +27,9 @@ nemlig delivery select <timeslot-id> --yes
 nemlig checkout status                      # anything missing?
 ```
 
+[AGENTS.md](AGENTS.md) is the precise reference for agents: exact JSON
+shapes, exit codes to branch on, safety rules, and working recipes.
+
 The last step is the one it cannot take. `checkout open` hands the basket to
 your browser, and payment, terms, and MobilePay stay with you — after you have
 seen the total. The worst an agent can do is fill your basket.

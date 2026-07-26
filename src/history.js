@@ -34,6 +34,15 @@ export function daysBetween(from, to) {
   return Math.round((to - from) / DAY_MS);
 }
 
+/** Days are epoch ms internally for the arithmetic, but ISO on the way out:
+ *  --json is consumed by scripts and agents, and 1765324800000 helps nobody. */
+function isoDay(epoch) {
+  return epoch == null ? null : new Date(epoch).toISOString().slice(0, 10);
+}
+
+const round = (value, places) =>
+  value == null ? null : Number(value.toFixed(places));
+
 /** Median, which shrugs off the one holiday gap that would skew a mean. */
 export function median(values) {
   if (!values.length) return null;
@@ -110,13 +119,16 @@ export function analyzePurchases(orders, { asOf = Date.now() } = {}) {
       id: product.id,
       name: product.name,
       orders: product.days.length,
-      shareOfOrders: product.days.length / (usable.length || 1),
+      shareOfOrders: round(product.days.length / (usable.length || 1), 3),
       typicalQuantity: Math.max(1, Math.round(median(product.quantities) ?? 1)),
       averagePrice: product.prices.length
-        ? product.prices.reduce((sum, value) => sum + value, 0) / product.prices.length
+        ? round(
+          product.prices.reduce((sum, value) => sum + value, 0) / product.prices.length,
+          2,
+        )
         : null,
-      firstBought: product.days[0],
-      lastBought: lastDay,
+      firstBought: isoDay(product.days[0]),
+      lastBought: isoDay(lastDay),
       daysSince,
       typicalInterval,
       dueInDays,
@@ -130,8 +142,8 @@ export function analyzePurchases(orders, { asOf = Date.now() } = {}) {
 
   return {
     ordersAnalyzed: usable.length,
-    from: usable[0]?.day ?? null,
-    to: usable[usable.length - 1]?.day ?? null,
+    from: isoDay(usable[0]?.day ?? null),
+    to: isoDay(usable[usable.length - 1]?.day ?? null),
     products: stats.sort((a, b) => {
       if (b.orders !== a.orders) return b.orders - a.orders;
       return (a.dueInDays ?? Infinity) - (b.dueInDays ?? Infinity);
