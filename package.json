@@ -1,14 +1,14 @@
 {
   "name": "nemlig-cli",
-  "version": "1.1.0",
-  "description": "Unofficial CLI for nemlig.com catalog, account, basket, delivery, and checkout preparation",
+  "version": "1.2.0",
+  "description": "Unofficial CLI for nemlig.com catalog, account, basket, delivery, reorder-from-history, and cross-chain price comparison",
   "type": "module",
   "bin": {
     "nemlig": "./src/cli.js"
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/api.js && node --check src/cli.js && node --check src/compare.js && node --check src/format.js && node --check src/goma.js && node --check src/retry.js && node --check src/session.js && node --check src/version.js"
+    "check": "node --check src/api.js && node --check src/cli.js && node --check src/compare.js && node --check src/format.js && node --check src/goma.js && node --check src/history.js && node --check src/retry.js && node --check src/session.js && node --check src/version.js"
   },
   "engines": {
     "node": ">=20"

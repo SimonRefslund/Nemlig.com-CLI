@@ -39,6 +39,9 @@ test("parseArgs supports multi-word searches and pagination", () => {
         sale: false,
         sort: "relevance",
         store: [],
+        orders: 10,
+        "min-orders": 2,
+        from: null,
       },
       positional: ["økologisk", "mælk"],
     },
@@ -361,6 +364,84 @@ test("compare reports the cheaper alternative and the saving", async () => {
   assert.match(stdout.value, /Fusilli/);
   assert.match(stdout.value, /Lidl/);
   assert.match(stdout.value, /Estimated saving:\s+11,42/);
+});
+
+function historyApi(basketLines = []) {
+  const written = [];
+  return {
+    written,
+    async getOrders() {
+      return { Orders: [{ OrderNumber: "1" }, { OrderNumber: "2" }] };
+    },
+    async getOrder(number) {
+      return {
+        OrderNumber: number,
+        DeliveryTime: {
+          Start: number === "1" ? "2026-05-16T17:00:00" : "2026-06-20T17:00:00",
+        },
+        Lines: [{ Id: "5001", Name: "Sødmælk øko.", Quantity: 3, ItemPrice: 15 }],
+      };
+    },
+    async getBasket() {
+      return { Lines: basketLines };
+    },
+    async setBasketItem(productId, quantity) {
+      written.push({ productId, quantity });
+      return {};
+    },
+  };
+}
+
+test("habits reports the cadence it inferred from past orders", async () => {
+  const stdout = outputBuffer();
+  await run(["habits"], { api: historyApi(), goma: {}, stdout, stderr: { write() {} } });
+  assert.match(stdout.value, /Sødmælk øko\./);
+  assert.match(stdout.value, /2\/2/);
+  assert.match(stdout.value, /35 d/);
+});
+
+test("reorder proposes but writes nothing without --yes", async () => {
+  const stdout = outputBuffer();
+  const api = historyApi();
+  await run(["reorder"], { api, goma: {}, stdout, stderr: { write() {} } });
+
+  assert.deepEqual(api.written, [], "a dry run must not touch the basket");
+  assert.match(stdout.value, /Would add/);
+  assert.match(stdout.value, /Repeat with --yes/);
+});
+
+test("reorder --yes adds the typical quantity", async () => {
+  const stdout = outputBuffer();
+  const api = historyApi();
+  await run(["reorder", "--yes"], { api, goma: {}, stdout, stderr: { write() {} } });
+
+  assert.deepEqual(api.written, [{ productId: "5001", quantity: 3 }]);
+  assert.match(stdout.value, /Added/);
+});
+
+test("reorder is idempotent: what is already in the basket is left alone", async () => {
+  const stdout = outputBuffer();
+  const api = historyApi([{ Id: "5001", Quantity: 1 }]);
+  await run(["reorder", "--yes"], { api, goma: {}, stdout, stderr: { write() {} } });
+
+  assert.deepEqual(api.written, [], "running twice must not double a line");
+  assert.match(stdout.value, /already in the basket/);
+});
+
+test("reorder --from repeats one order exactly", async () => {
+  const stdout = outputBuffer();
+  const api = historyApi();
+  await run(["reorder", "--from", "1063490166", "--yes"], {
+    api,
+    goma: {},
+    stdout,
+    stderr: { write() {} },
+  });
+  assert.deepEqual(api.written, [{ productId: "5001", quantity: 3 }]);
+});
+
+test("--from requires an order number", () => {
+  assert.throws(() => parseArgs(["reorder", "--from", "last"]), /requires an order number/);
 });
 
 test("exit codes distinguish usage, auth, and upstream failures", () => {

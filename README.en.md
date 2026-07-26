@@ -19,9 +19,8 @@ what's cheaper at the other chains, and reserve a free delivery slot this
 weekend"*, and it can do the whole thing:
 
 ```sh
-nemlig orders --limit 1 --json              # what was ordered last time?
-nemlig orders show <order-number> --json    # the individual lines
-nemlig basket add <product-id> <qty> --yes  # refill the basket
+nemlig habits --json                        # what do we buy regularly, how often?
+nemlig reorder --yes                        # basket what is running out
 nemlig compare --json                       # where is it cheaper?
 nemlig delivery slots --days 7 --json       # find a 0 kr. slot
 nemlig delivery select <timeslot-id> --yes
@@ -172,6 +171,41 @@ The CLI deliberately does **not** expose `PlaceOrderLoggedIn`. Payment,
 acceptance of the current terms, 3-D Secure/MobilePay, and the final order
 confirmation remain in your browser, where the total and delivery details are
 visible.
+
+## Learning from past orders
+
+`habits` reads your recent orders and works out what you buy regularly and how
+often. Cadence is measured in **days between purchases** rather than "every Nth
+order", because shopping trips are irregular — counting orders would make a
+weekly staple and a quarterly one look identical whenever they land in the same
+basket.
+
+```sh
+nemlig habits
+nemlig habits --orders 20 --min-orders 3
+nemlig reorder                            # proposal only; the basket is untouched
+nemlig reorder --yes                      # apply it
+nemlig reorder --from 1063490166 --yes    # repeat one specific order
+```
+
+```text
+PRODUCT                          ORDERS   EVERY    LAST BOUGHT   DUE
+Sødmælk 25% jersey øko.          6/7      35 d     36 d ago      1 d ago
+Gulerødder øko.                  4/7      45 d     71 d ago      26 d ago
+Falke hvedemel øko.              5/7      47 d     36 d ago      in 11 d
+```
+
+Two limits are worth knowing:
+
+- The interval is the **median** gap between purchases, so it shrugs off one
+  holiday-sized outlier — but two purchases is a guess, not a cadence. Raise
+  `--min-orders` for a stricter view.
+- A product bought a few times and then dropped would otherwise read as months
+  overdue. Past twice its own interval it is treated as **lapsed** and kept out
+  of `reorder`; `habits` lists those separately.
+
+`reorder` skips anything already in the basket, so running it twice adds
+nothing the second time.
 
 ## Price comparison (goma.gg)
 

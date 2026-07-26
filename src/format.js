@@ -576,6 +576,123 @@ export function renderComparison(result, { columns = 100 } = {}) {
   return out.join("\n");
 }
 
+function dueLabel(product) {
+  if (!product.predictable || product.typicalInterval == null) return "—";
+  const due = product.dueInDays;
+  if (due > 0) return `in ${due} d`;
+  if (due === 0) return "today";
+  return `${-due} d ago`;
+}
+
+export function renderHabits(analysis, { minOrders = 2, limit = 25, columns = 100 } = {}) {
+  const products = analysis.products.filter((product) => product.orders >= minOrders);
+  if (!products.length) {
+    return `No product was bought more than ${minOrders - 1} time(s) in the ` +
+      `last ${analysis.ordersAnalyzed} orders.`;
+  }
+
+  const active = products.filter((product) => product.predictable && !product.lapsed);
+  const lapsed = products.filter((product) => product.predictable && product.lapsed);
+  const overdue = [...active]
+    .sort((a, b) => (a.dueInDays ?? Infinity) - (b.dueInDays ?? Infinity));
+  const shown = overdue.slice(0, limit);
+
+  const nameWidth = Math.max(18, Math.min(34, columns - 56));
+  const widths = [nameWidth, 7, 10, 12, 11];
+  const headers = ["PRODUCT", "ORDERS", "EVERY", "LAST BOUGHT", "DUE"];
+
+  const lines = [
+    headers.map((value, index) => pad(value, widths[index])).join("  ").trimEnd(),
+    widths.map((width) => "─".repeat(width)).join("  "),
+    ...shown.map((product) =>
+      [
+        pad(product.name, widths[0]),
+        pad(`${product.orders}/${analysis.ordersAnalyzed}`, widths[1]),
+        pad(
+          product.typicalInterval == null ? "—" : `${product.typicalInterval} d`,
+          widths[2],
+        ),
+        pad(`${product.daysSince} d ago`, widths[3]),
+        pad(dueLabel(product), widths[4]),
+      ].join("  ").trimEnd()
+    ),
+  ];
+
+  const hidden = overdue.length - shown.length;
+  lines.push(
+    "",
+    `${active.length} regular purchases across ${analysis.ordersAnalyzed} orders` +
+      (hidden > 0 ? ` · ${hidden} more (use --limit)` : ""),
+  );
+
+  if (lapsed.length) {
+    const examples = lapsed
+      .sort((a, b) => b.orders - a.orders)
+      .slice(0, 3)
+      .map((product) => product.name);
+    lines.push(
+      `${lapsed.length} look dropped rather than due (${examples.join(", ")}` +
+        `${lapsed.length > examples.length ? ", …" : ""}) — excluded from reorder`,
+    );
+  }
+  if (analysis.failed) {
+    lines.push(`${analysis.failed} order(s) could not be loaded`);
+  }
+  lines.push(
+    "Cadence is the median gap between purchases, so two purchases is a guess.",
+  );
+  return lines.join("\n");
+}
+
+export function renderReorderPlan(plan, { applied = false, columns = 100 } = {}) {
+  const { add, skipped } = plan;
+  if (!add.length && !skipped.length) {
+    return "Nothing looks due yet. Try --orders to widen the history, or " +
+      "nemlig habits to see the cadences.";
+  }
+  if (!add.length) {
+    return `Everything due is already in the basket (${skipped.length} item(s)).`;
+  }
+
+  const nameWidth = Math.max(18, Math.min(34, columns - 46));
+  const widths = [3, nameWidth, 9, 11, 11];
+  const lines = [
+    ["QTY", "PRODUCT", "ID", "LAST", "DUE"]
+      .map((value, index) => pad(value, widths[index])).join("  ").trimEnd(),
+    widths.map((width) => "─".repeat(width)).join("  "),
+    ...add.map((product) =>
+      [
+        padStart(product.quantity, widths[0]),
+        pad(product.name, widths[1]),
+        pad(product.id, widths[2]),
+        pad(`${product.daysSince} d ago`, widths[3]),
+        pad(dueLabel(product), widths[4]),
+      ].join("  ").trimEnd()
+    ),
+  ];
+
+  const estimated = add.reduce(
+    (sum, product) => sum + (product.averagePrice ?? 0) * product.quantity,
+    0,
+  );
+  lines.push(
+    "",
+    ...summaryRows([
+      [applied ? "Added" : "Would add", `${add.length} product(s)`],
+      ["Estimated cost", formatPrice(estimated)],
+    ]),
+  );
+  if (skipped.length) {
+    lines.push(`${skipped.length} already in the basket, left alone`);
+  }
+  lines.push(
+    applied
+      ? "Run: nemlig basket — then nemlig checkout status"
+      : "Nothing was changed. Repeat with --yes to add these to the basket.",
+  );
+  return lines.join("\n");
+}
+
 function shortAddress(address) {
   if (!address || address.IsEmptyAddress) return null;
   const street = [

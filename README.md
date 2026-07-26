@@ -25,9 +25,8 @@ Giv den fx opgaven:
 Den kan løse det hele selv:
 
 ```sh
-nemlig orders --limit 1 --json              # hvad blev der købt sidst?
-nemlig orders show <ordrenummer> --json     # de enkelte varelinjer
-nemlig basket add <vare-id> <antal> --yes   # fyld kurven op igen
+nemlig habits --json                        # hvad køber vi fast, og hvor tit?
+nemlig reorder --yes                        # læg det, der er ved at slippe op, i kurven
 nemlig compare --json                       # hvor er det billigere?
 nemlig delivery slots --days 7 --json       # find en tid til 0 kr.
 nemlig delivery select <tid-id> --yes
@@ -78,6 +77,35 @@ disken, og filen kan kun læses af dig selv:
 | --- | --- |
 | macOS og Linux | `~/.config/nemlig-cli/session.json` |
 | Windows | `%APPDATA%\nemlig-cli\session.json` |
+
+## Den lærer af dine tidligere ordrer
+
+`habits` læser dine seneste ordrer og regner ud, hvad du køber fast, og hvor
+tit. Kadencen måles i **dage mellem køb** — ikke i "hver anden ordre" — for du
+handler ikke med faste mellemrum.
+
+```sh
+nemlig habits
+nemlig habits --orders 20 --min-orders 3
+nemlig reorder                       # forslag; rører ikke kurven
+nemlig reorder --yes                 # læg forslaget i kurven
+nemlig reorder --from 1063490166 --yes   # gentag én bestemt ordre
+```
+
+```text
+PRODUCT                          ORDERS   EVERY    LAST BOUGHT   DUE
+Sødmælk 25% jersey øko.          6/7      35 d     36 d ago      1 d ago
+Gulerødder øko.                  4/7      45 d     71 d ago      26 d ago
+Falke hvedemel øko.              5/7      47 d     36 d ago      in 11 d
+```
+
+`reorder` foreslår kun, indtil du tilføjer `--yes`, og springer over det, der
+allerede ligger i kurven — så du kan køre den to gange uden at fordoble noget.
+
+To ting er værd at vide: en vare, du kun har købt to gange, giver et gæt, ikke
+en kadence. Og en vare, du købte et par gange og så droppede, bliver markeret
+som opgivet i stedet for at stå som månedsvis forsinket — den kommer ikke med i
+`reorder`.
 
 ## Kurv, ordrer og levering
 
@@ -165,7 +193,7 @@ eller goma.gg · `64` forkert brug.
 ## Udvikling
 
 ```sh
-npm test        # 75 tests, ingen kald ud af huset
+npm test        # 96 tests, ingen kald ud af huset
 npm run check
 ```
 

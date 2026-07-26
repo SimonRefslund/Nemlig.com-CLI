@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 
 import { NemligApi, todayIso } from "./api.js";
 import { compareBasket } from "./compare.js";
+import { dueNow, loadHistory, normalizeOrder, planReorder } from "./history.js";
 import {
   renderAccount,
   renderBasket,
@@ -12,10 +13,12 @@ import {
   renderComparison,
   renderDeliveryDays,
   renderGomaProducts,
+  renderHabits,
   renderOrder,
   renderOrders,
   renderProduct,
   renderProducts,
+  renderReorderPlan,
   renderSuggestions,
 } from "./format.js";
 import { GOMA_SORTS, GOMA_STORES, GomaApi, resolveStore } from "./goma.js";
@@ -45,6 +48,8 @@ Usage:
                              [--limit <n>] [--offset <n>] [--json]
   nemlig goma stores
   nemlig compare [--store <name>]... [--json]
+  nemlig habits [--orders <n>] [--min-orders <n>] [--limit <n>] [--json]
+  nemlig reorder [--orders <n>] [--from <order-number>] [--yes] [--json]
   nemlig --help
   nemlig --version
 
@@ -67,10 +72,16 @@ Examples:
   nemlig goma search "hakkede tomater" --store Netto --store Lidl
   nemlig compare
   nemlig compare --store "REMA 1000" --json
+  nemlig habits
+  nemlig reorder
+  nemlig reorder --from 1063490166 --yes
 
 Price checking uses goma.gg, which tracks offers across Danish chains. "compare"
 matches your nemlig.com basket to goma.gg products by name and pack size and
 reports the cheapest comparable alternative — it is a guide, not a quote.
+
+"habits" reads your past orders and works out what you buy regularly and how
+often. "reorder" turns that into a basket, skipping anything already in it.
 
 Passwords are prompted without echo and are never stored. Session cookies are
 stored with user-only permissions. Orders are always placed in your browser;
@@ -84,7 +95,7 @@ Environment:
   GOMA_API_ORIGIN     override the goma.gg API origin`;
 
 const FLAGS = { "--json": "json", "--yes": "yes", "--all": "all", "--sale": "sale" };
-const NUMBERS = new Set(["--limit", "--offset", "--days"]);
+const NUMBERS = new Set(["--limit", "--offset", "--days", "--orders", "--min-orders"]);
 
 /** Rejects well-formed but impossible dates such as 2026-99-99. */
 function parseIsoDate(raw) {
@@ -116,6 +127,9 @@ export function parseArgs(argv) {
     sale: false,
     sort: "relevance",
     store: [],
+    orders: 10,
+    "min-orders": 2,
+    from: null,
   };
   const positional = [];
   let optionsEnded = false;
@@ -149,6 +163,12 @@ export function parseArgs(argv) {
       options[name.slice(2)] = Number(raw);
     } else if (name === "--start") {
       options.start = parseIsoDate(takeValue());
+    } else if (name === "--from") {
+      const raw = takeValue();
+      if (!raw || !/^\d+$/.test(raw)) {
+        throw new Error("--from requires an order number");
+      }
+      options.from = raw;
     } else if (name === "--store") {
       const raw = takeValue();
       if (!raw) throw new Error("--store requires a store name");
@@ -171,6 +191,9 @@ export function parseArgs(argv) {
   }
   if (options.days < 1 || options.days > 31) {
     throw new Error("--days must be between 1 and 31");
+  }
+  if (options.orders < 1 || options.orders > 50) {
+    throw new Error("--orders must be between 1 and 50");
   }
   return { command, options, positional };
 }
@@ -263,6 +286,16 @@ export async function openInBrowser(
     `Could not open a browser (${lastError?.message ?? "no opener found"}). ` +
       `Open this URL yourself: ${url}`,
   );
+}
+
+/** Progress goes to stderr so --json and pipes stay clean. */
+function progressReporter(stderr, json, label) {
+  if (json || !stderr?.isTTY) return null;
+  return (done, total) => stderr.write(`\r${label}… ${done}/${total}`);
+}
+
+function clearProgress(stderr, json) {
+  if (!json && stderr?.isTTY) stderr.write("\r\u001b[2K");
 }
 
 function requireYes(options, action) {
@@ -513,18 +546,71 @@ export async function run(
     // Validate up front; a typo would otherwise fail once per basket line.
     options.store.forEach(resolveStore);
     const basket = await api.getBasket();
-    const lineCount = basket?.Lines?.length ?? 0;
-    const showProgress = !options.json && stderr?.isTTY && lineCount > 0;
     const result = await compareBasket(basket, goma, {
       stores: options.store.length ? options.store : null,
-      onProgress: showProgress
-        ? (done, total) => stderr.write(`\rChecking goma.gg… ${done}/${total}`)
-        : null,
+      onProgress: progressReporter(stderr, options.json, "Checking goma.gg"),
     });
-    if (showProgress) stderr.write("\r\u001b[2K");
+    clearProgress(stderr, options.json);
     output = options.json
       ? JSON.stringify(result, null, 2)
       : renderComparison(result, { columns: stdout.columns ?? 100 });
+  } else if (command === "habits") {
+    if (positional.length) throw new Error("habits accepts no arguments");
+    const analysis = await loadHistory(api, {
+      orders: options.orders,
+      onProgress: progressReporter(stderr, options.json, "Reading orders"),
+    });
+    clearProgress(stderr, options.json);
+    output = options.json
+      ? JSON.stringify(analysis, null, 2)
+      : renderHabits(analysis, {
+        minOrders: options["min-orders"],
+        limit: options.limit,
+        columns: stdout.columns ?? 100,
+      });
+  } else if (command === "reorder") {
+    if (positional.length) throw new Error("reorder accepts no arguments");
+
+    let candidates;
+    if (options.from) {
+      // Repeat one specific order rather than inferring a cadence.
+      const previous = normalizeOrder(await api.getOrder(options.from));
+      if (!previous.lines.length) {
+        throw new Error(`Order ${options.from} has no lines to reorder`);
+      }
+      candidates = previous.lines.map((line) => ({
+        id: line.id,
+        name: line.name,
+        typicalQuantity: line.quantity,
+        averagePrice: line.price,
+        daysSince: null,
+        predictable: false,
+        typicalInterval: null,
+        dueInDays: null,
+      }));
+    } else {
+      const analysis = await loadHistory(api, {
+        orders: options.orders,
+        onProgress: progressReporter(stderr, options.json, "Reading orders"),
+      });
+      clearProgress(stderr, options.json);
+      candidates = dueNow(analysis, { minOrders: options["min-orders"] });
+    }
+
+    const basket = await api.getBasket();
+    const plan = planReorder(candidates, basket);
+
+    if (options.yes && plan.add.length) {
+      for (const product of plan.add) {
+        await api.setBasketItem(product.id, product.quantity);
+      }
+    }
+    output = options.json
+      ? JSON.stringify({ applied: Boolean(options.yes), ...plan }, null, 2)
+      : renderReorderPlan(plan, {
+        applied: Boolean(options.yes),
+        columns: stdout.columns ?? 100,
+      });
   } else {
     throw new Error(`Unknown command: ${command ?? "(none)"}`);
   }
