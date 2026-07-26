@@ -10,6 +10,25 @@ function jsonResponse(value, status = 200) {
   });
 }
 
+/**
+ * A fetch that only ever settles when its signal aborts. AbortSignal.timeout
+ * uses an unref'd timer, so without a ref'd handle of its own the event loop
+ * drains before the timeout fires and the promise never settles at all — which
+ * on Node 20 and 22 wedges every test that follows.
+ */
+function neverSettles(_url, options) {
+  return new Promise((_resolve, reject) => {
+    const keepAlive = setTimeout(
+      () => reject(new Error("signal never aborted")),
+      5_000,
+    );
+    options.signal.addEventListener("abort", () => {
+      clearTimeout(keepAlive);
+      reject(options.signal.reason);
+    });
+  });
+}
+
 test("store names are resolved case- and punctuation-insensitively", () => {
   assert.equal(resolveStore("rema 1000"), "REMA 1000");
   assert.equal(resolveStore("rema1000"), "REMA 1000");
@@ -77,12 +96,7 @@ test("a rejected key points at the GOMA_API_KEY override", async () => {
 });
 
 test("a stalled goma.gg request times out", async () => {
-  const api = new GomaApi({
-    fetchImpl: async (_url, options) =>
-      new Promise((_resolve, reject) => {
-        options.signal.addEventListener("abort", () => reject(options.signal.reason));
-      }),
-  });
+  const api = new GomaApi({ fetchImpl: neverSettles });
   process.env.NEMLIG_TIMEOUT_MS = "50";
   try {
     await assert.rejects(() => api.search("kaffe"), /did not respond within/);

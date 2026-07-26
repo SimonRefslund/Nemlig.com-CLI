@@ -17,6 +17,25 @@ const settings = {
   SitecorePublishedStamp: "content",
 };
 
+/**
+ * A fetch that only ever settles when its signal aborts. AbortSignal.timeout
+ * uses an unref'd timer, so without a ref'd handle of its own the event loop
+ * drains before the timeout fires and the promise never settles at all — which
+ * on Node 20 and 22 wedges every test that follows.
+ */
+function neverSettles(_url, options) {
+  return new Promise((_resolve, reject) => {
+    const keepAlive = setTimeout(
+      () => reject(new Error("signal never aborted")),
+      5_000,
+    );
+    options.signal.addEventListener("abort", () => {
+      clearTimeout(keepAlive);
+      reject(options.signal.reason);
+    });
+  });
+}
+
 test("search bootstraps a session and calls the captured search endpoint", async () => {
   const calls = [];
   const api = new NemligApi({
@@ -134,12 +153,7 @@ test("an unknown product ID reports the ID rather than a slug error", async () =
 });
 
 test("stalled requests fail with a timeout message instead of hanging", async () => {
-  const api = new NemligApi({
-    fetchImpl: async (url, options) =>
-      new Promise((_resolve, reject) => {
-        options.signal.addEventListener("abort", () => reject(options.signal.reason));
-      }),
-  });
+  const api = new NemligApi({ fetchImpl: neverSettles });
 
   process.env.NEMLIG_TIMEOUT_MS = "50";
   try {
