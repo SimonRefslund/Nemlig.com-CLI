@@ -166,6 +166,8 @@ function describeCandidate(product) {
   const price = Number(product?.current_price);
   const pack = toBaseAmount(product?.amount, product?.unit);
   return {
+    // Kept so price history can be looked up for whichever candidate wins.
+    productId: product?.product_id ?? null,
     store: product?.store_name ?? "?",
     name: product?.product_name ?? "?",
     brand: product?.brand ?? "",

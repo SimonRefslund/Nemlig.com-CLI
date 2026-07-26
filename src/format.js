@@ -514,7 +514,7 @@ export function renderGomaProducts(result, { columns = 100 } = {}) {
   return lines.join("\n");
 }
 
-export function renderComparison(result, { columns = 100 } = {}) {
+export function renderComparison(result, { columns = 100, history = false } = {}) {
   const { rows, summary } = result;
   if (!rows.length) return "Basket is empty; nothing to compare.";
 
@@ -553,6 +553,16 @@ export function renderComparison(result, { columns = 100 } = {}) {
         `${marker} ${row.line.name} (${packLabel(row.line.pack)})` +
           ` → ${row.best.store}: ${row.best.name} (${packLabel(row.best.pack)})${validity}`,
       );
+      const past = row.best.history;
+      if (history && past && !past.insufficientData) {
+        out.push(
+          `    over the past year: ${past.verdictLabel}` +
+            ` (low ${formatPrice(past.lowest)}, avg ${formatPrice(past.average)},` +
+            ` cheaper on ${past.percentCheaper}% of days)`,
+        );
+      } else if (history) {
+        out.push("    over the past year: no price history");
+      }
     }
   }
 
@@ -574,6 +584,71 @@ export function renderComparison(result, { columns = 100 } = {}) {
       " lines marked ? are lower-confidence matches.",
   );
   return out.join("\n");
+}
+
+/** A coarse sparkline; enough to see the shape of a year without a chart. */
+function sparkline(values, width = 48) {
+  const blocks = "▁▂▃▄▅▆▇█";
+  if (!values.length) return "";
+  const step = Math.max(1, Math.ceil(values.length / width));
+  const buckets = [];
+  for (let index = 0; index < values.length; index += step) {
+    const slice = values.slice(index, index + step);
+    buckets.push(slice.reduce((sum, value) => sum + value, 0) / slice.length);
+  }
+  const low = Math.min(...buckets);
+  const high = Math.max(...buckets);
+  if (high === low) return blocks[0].repeat(buckets.length);
+  return buckets
+    .map((value) =>
+      blocks[Math.round(((value - low) / (high - low)) * (blocks.length - 1))]
+    )
+    .join("");
+}
+
+export function renderPriceHistory(summary, { product = null, history = null } = {}) {
+  if (summary.insufficientData) {
+    return `No price history on goma.gg for ${product?.product_name ?? summary.productId}.`;
+  }
+
+  const header = product
+    ? [
+      `${product.product_name} — ${product.store_name}`,
+      product.brand ? `${product.brand}` : null,
+      "",
+    ].filter((line) => line !== null)
+    : [];
+
+  const rows = [
+    ["Price now", formatPrice(summary.price)],
+    ["Year low", `${formatPrice(summary.lowest)}${
+      summary.lowestOn ? ` on ${formatDay(summary.lowestOn)}` : ""
+    }`],
+    ["Year high", formatPrice(summary.highest)],
+    ["Average", formatPrice(summary.average)],
+    ["Cheaper on", `${summary.cheaperDays} of ${summary.days} days (${summary.percentCheaper}%)`],
+    ["On offer", `${summary.daysOnSale} of ${summary.days} days`],
+  ];
+  if (summary.aboveLowest > 0) {
+    rows.push(["Above the low", formatPrice(summary.aboveLowest)]);
+  }
+  if (summary.lastCheaper) {
+    rows.push([
+      "Last cheaper",
+      `${formatPrice(summary.lastCheaperPrice)} on ${formatDay(summary.lastCheaper)}`,
+    ]);
+  }
+
+  const lines = [...header, ...summaryRows(rows), ""];
+  if (history?.points?.length) {
+    lines.push(
+      sparkline(history.points.map((point) => point.price)),
+      `${formatDay(history.points[0].date)} → ${formatDay(history.points.at(-1).date)}`,
+      "",
+    );
+  }
+  lines.push(`Verdict: this price is ${summary.verdictLabel}.`);
+  return lines.join("\n");
 }
 
 function dueLabel(product) {

@@ -24,7 +24,7 @@ jobs:
           node-version: ${{ matrix.node }}
 
       - name: Syntax check
-        run: node --check src/cli.js && node --check src/api.js && node --check src/compare.js && node --check src/format.js && node --check src/goma.js && node --check src/history.js && node --check src/retry.js && node --check src/session.js && node --check src/version.js
+        run: node --check src/cli.js && node --check src/api.js && node --check src/compare.js && node --check src/format.js && node --check src/goma.js && node --check src/history.js && node --check src/pricehistory.js && node --check src/retry.js && node --check src/session.js && node --check src/version.js
 
       # The tests are hermetic: every network call is stubbed, so CI never
       # touches nemlig.com or goma.gg.

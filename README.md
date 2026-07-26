@@ -248,6 +248,50 @@ The client uses the publishable, RLS-protected key that goma.gg's own web app
 ships with, and opts out of their search analytics. goma.gg also offers a
 sanctioned partner Data API (goma@goma.gg) if you need a contractual footing.
 
+## Is it actually a good price?
+
+Cheaper than nemlig.com does not mean cheap. goma.gg keeps a year of daily
+prices, so a price can be judged against what the product normally costs.
+
+```sh
+nemlig goma history kaffe --store Netto
+nemlig goma history "hakkede tomater" --store Netto --days 180 --json
+nemlig compare --history
+```
+
+```text
+Bl. 66 formalet kaffe — Netto
+
+Price now:      66,00 kr.
+Year low:       39,00 kr. on Sat, 22 Nov 2025
+Year high:      74,95 kr.
+Average:        59,19 kr.
+Cheaper on:     255 of 365 days (70%)
+On offer:       118 of 365 days
+Last cheaper:   45,00 kr. on Sat, 25 Jul 2026
+
+▅▃▅▆▆▃▆▃▅▆▂▄▄▅▆▂▃▆▄▃▅▆▂▄█▅▁▁▇▁▄██▄▇▇▄██▄▇███▅▃
+Mon, 14 Jul 2025 → Sun, 26 Jul 2026
+
+Verdict: this price is above its usual price.
+```
+
+`compare --history` runs the same judgement on every cheaper alternative it
+found, which is where it earns its keep — a rival shop can be cheaper than
+nemlig.com today and still be at its own yearly high:
+
+```text
+? Kartoffelrøsti (200 g) → Wolt Market: Kartoffelrøsti, Gestus (500 g)
+    over the past year: near its highest (low 23,50 kr., cheaper on 77% of days)
+? Remoulade (375 g) → Bilka: Grov remoulade (800 g)
+    over the past year: at its lowest this year (low 20,00 kr., cheaper on 0% of days)
+```
+
+The verdict ranks today against every day of the year, splitting ties. That
+detail matters: a shelf price that holds steady at its high for most of the
+year has few strictly-cheaper days, and ranking on those alone would score a
+year-high price as a bargain.
+
 ## Environment
 
 | Variable | Effect |

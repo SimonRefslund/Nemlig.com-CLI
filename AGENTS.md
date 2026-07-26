@@ -69,7 +69,8 @@ nemlig delivery select <timeslot-id> --yes
 
 nemlig goma search <query> [--store name]... [--sale] [--sort key] --json
 nemlig goma stores --json
-nemlig compare [--store name]... --json
+nemlig goma history <query|goma-product-id> [--store name] [--days n] --json
+nemlig compare [--store name]... [--history] --json
 
 nemlig checkout status --json
 nemlig checkout open
@@ -171,6 +172,34 @@ user the order is ready.
 `DeliveryPrice`, `Deadline`, `IsSelected`, and `Availability` (`1` bookable,
 `0` not). The slot the account already reserved reports `Availability: 0` with
 `IsSelected: true` — that is normal, not an error.
+
+## Judging whether a price is good
+
+`nemlig goma history <query> --json` returns a year of daily prices plus a
+verdict. `compare --history` attaches the same verdict to each cheaper
+alternative under `rows[].best.history`, costing one extra request per match.
+
+```json
+{ "product": { "product_id": "netto-81502000020-EA", "product_name": "Bl. 66 formalet kaffe" },
+  "summary": { "productId": "netto-81502000020-EA", "days": 365, "price": 66,
+               "lowest": 39, "highest": 74.95, "average": 59.19,
+               "lowestOn": "2025-11-22", "percentCheaper": 70, "percentile": 70,
+               "cheaperDays": 255, "equalDays": 1, "daysOnSale": 118,
+               "aboveLowest": 27, "lastCheaper": "2026-07-25", "lastCheaperPrice": 45,
+               "verdict": "poor", "verdictLabel": "above its usual price",
+               "insufficientData": false },
+  "points": [ { "date": "2025-07-14", "price": 65, "normalPrice": 65, "onSale": false } ] }
+```
+
+`verdict` is one of `lowest`, `great`, `good`, `normal`, `poor`, `bad`, driven
+by `percentile` — the share of days the product cost the same or less, with
+ties split. Use `percentile`, not `percentCheaper`, for any judgement: a price
+that sits at its yearly high for most of the year has few *strictly* cheaper
+days and would otherwise look like a bargain.
+
+Check `insufficientData` before reading any other field. **Being cheaper than
+nemlig.com and being a good price are different claims** — a rival shop can
+undercut nemlig.com today while sitting at its own yearly high. Report both.
 
 ## How `compare` matches, and why the total is an estimate
 

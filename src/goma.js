@@ -11,6 +11,7 @@ const GOMA_ORIGIN = "https://api.goma.gg";
 const GOMA_PUBLIC_KEY = "sb_publishable_5oBbD8YuxtVjYKBx4pNJzg_hOe593yN";
 
 const SEARCH_RPC = "search_products_public_v1";
+const HISTORY_RPC = "get_product_price_history_v1";
 const DEFAULT_TIMEOUT_MS = 20_000;
 
 /** Store names accepted by --store, as goma.gg spells them. */
@@ -125,7 +126,49 @@ export class GomaApi {
       p_source: null,
     };
 
-    const url = `${this.origin}/rest/v1/rpc/${SEARCH_RPC}`;
+    const payload = await this.rpc(SEARCH_RPC, body);
+    return {
+      products: payload?.products ?? [],
+      total: payload?.total_count ?? 0,
+      onSale: payload?.total_on_sale_count ?? 0,
+      departments: payload?.departments ?? [],
+      categories: payload?.categories ?? [],
+    };
+  }
+
+  /**
+   * A year of daily prices for one goma.gg product, so a "cheaper" price can
+   * be judged against what the product normally costs rather than taken at
+   * face value.
+   */
+  async priceHistory(productId, { days = 365 } = {}) {
+    if (!productId) throw new GomaApiError("A goma.gg product id is required");
+    const payload = await this.rpc(HISTORY_RPC, {
+      p_product_id: String(productId),
+      p_days: days,
+      p_limit: days,
+    });
+    return {
+      productId: String(productId),
+      days,
+      points: (payload?.points ?? [])
+        .filter((point) => point?.price != null)
+        .map((point) => ({
+          date: String(point.validFrom ?? point.createdAt ?? "").slice(0, 10),
+          price: Number(point.price),
+          normalPrice: point.normalPrice == null ? null : Number(point.normalPrice),
+          onSale: point.isOnSale === true,
+        }))
+        .filter((point) => point.date && Number.isFinite(point.price)),
+      currentPrice: payload?.currentPrice ?? null,
+      lowestPrice: payload?.lowestPrice ?? payload?.minPrice ?? null,
+      highestPrice: payload?.highestPrice ?? payload?.maxPrice ?? null,
+      averagePrice: payload?.averagePrice ?? null,
+    };
+  }
+
+  async rpc(name, body) {
+    const url = `${this.origin}/rest/v1/rpc/${name}`;
     const timeoutMs = this.timeoutMs;
     let response;
     try {
@@ -167,20 +210,11 @@ export class GomaApi {
       );
     }
 
-    let payload;
     try {
-      payload = await response.json();
+      return await response.json();
     } catch (cause) {
       throw new GomaApiError("goma.gg returned invalid JSON", { cause });
     }
-
-    return {
-      products: payload?.products ?? [],
-      total: payload?.total_count ?? 0,
-      onSale: payload?.total_on_sale_count ?? 0,
-      departments: payload?.departments ?? [],
-      categories: payload?.categories ?? [],
-    };
   }
 }
 

@@ -16,12 +16,14 @@ import {
   renderHabits,
   renderOrder,
   renderOrders,
+  renderPriceHistory,
   renderProduct,
   renderProducts,
   renderReorderPlan,
   renderSuggestions,
 } from "./format.js";
-import { GOMA_SORTS, GOMA_STORES, GomaApi, resolveStore } from "./goma.js";
+import { GOMA_SORTS, GOMA_STORES, GomaApi, mapWithLimit, resolveStore } from "./goma.js";
+import { summarizePriceHistory } from "./pricehistory.js";
 import { VERSION } from "./version.js";
 
 const HELP = `nemlig — use nemlig.com from the command line
@@ -47,7 +49,8 @@ Usage:
   nemlig goma search <query> [--store <name>]... [--sale] [--sort <key>]
                              [--limit <n>] [--offset <n>] [--json]
   nemlig goma stores
-  nemlig compare [--store <name>]... [--json]
+  nemlig goma history <query> [--store <name>] [--days <n>] [--json]
+  nemlig compare [--store <name>]... [--history] [--json]
   nemlig habits [--orders <n>] [--min-orders <n>] [--limit <n>] [--json]
   nemlig reorder [--orders <n>] [--from <order-number>] [--yes] [--json]
   nemlig --help
@@ -71,7 +74,9 @@ Examples:
   nemlig goma search kaffe --sale --sort discount
   nemlig goma search "hakkede tomater" --store Netto --store Lidl
   nemlig compare
+  nemlig compare --history
   nemlig compare --store "REMA 1000" --json
+  nemlig goma history kaffe --store Netto
   nemlig habits
   nemlig reorder
   nemlig reorder --from 1063490166 --yes
@@ -79,6 +84,10 @@ Examples:
 Price checking uses goma.gg, which tracks offers across Danish chains. "compare"
 matches your nemlig.com basket to goma.gg products by name and pack size and
 reports the cheapest comparable alternative — it is a guide, not a quote.
+
+"goma history" shows a year of daily prices for a product, and "compare
+--history" says whether each cheaper price is actually a good one or just the
+shop's normal price.
 
 "habits" reads your past orders and works out what you buy regularly and how
 often. "reorder" turns that into a basket, skipping anything already in it.
@@ -94,7 +103,13 @@ Environment:
   GOMA_API_KEY        override the public goma.gg key if it rotates
   GOMA_API_ORIGIN     override the goma.gg API origin`;
 
-const FLAGS = { "--json": "json", "--yes": "yes", "--all": "all", "--sale": "sale" };
+const FLAGS = {
+  "--json": "json",
+  "--yes": "yes",
+  "--all": "all",
+  "--sale": "sale",
+  "--history": "history",
+};
 const NUMBERS = new Set(["--limit", "--offset", "--days", "--orders", "--min-orders"]);
 
 /** Rejects well-formed but impossible dates such as 2026-99-99. */
@@ -120,7 +135,7 @@ export function parseArgs(argv) {
     json: false,
     limit: 20,
     offset: 0,
-    days: 7,
+    days: null,
     start: null,
     yes: false,
     all: false,
@@ -130,6 +145,7 @@ export function parseArgs(argv) {
     orders: 10,
     "min-orders": 2,
     from: null,
+    history: false,
   };
   const positional = [];
   let optionsEnded = false;
@@ -189,8 +205,8 @@ export function parseArgs(argv) {
   if (options.limit < 1 || options.limit > 100) {
     throw new Error("--limit must be between 1 and 100");
   }
-  if (options.days < 1 || options.days > 31) {
-    throw new Error("--days must be between 1 and 31");
+  if (options.days != null && (options.days < 1 || options.days > 366)) {
+    throw new Error("--days must be between 1 and 366");
   }
   if (options.orders < 1 || options.orders > 50) {
     throw new Error("--orders must be between 1 and 50");
@@ -474,8 +490,12 @@ export async function run(
     const [subcommand = "slots", ...values] = positional;
     if (subcommand === "slots") {
       if (values.length) throw new Error("delivery slots accepts no arguments");
+      const deliveryDays = options.days ?? 7;
+      if (deliveryDays > 31) {
+        throw new Error("delivery slots supports at most 31 days");
+      }
       const result = await api.getDeliveryDays({
-        days: options.days,
+        days: deliveryDays,
         startDate: options.start || todayIso(),
       });
       output = options.json
@@ -538,6 +558,30 @@ export async function run(
       output = options.json
         ? JSON.stringify(result, null, 2)
         : renderGomaProducts(result, { columns: stdout.columns ?? 100 });
+    } else if (subcommand === "history") {
+      const term = values.join(" ").trim();
+      if (!term) throw new Error("goma history requires a query or product id");
+
+      // Accept a goma product id directly, otherwise take the best search hit.
+      let product = null;
+      let productId = /^[a-z0-9]+-[A-Za-z0-9_-]+$/.test(term) && values.length === 1
+        ? term
+        : null;
+      if (!productId) {
+        const found = await goma.search(term, {
+          stores: options.store,
+          limit: 1,
+        });
+        product = found.products[0];
+        if (!product) throw new Error(`No product found on goma.gg for "${term}"`);
+        productId = product.product_id;
+      }
+
+      const history = await goma.priceHistory(productId, { days: options.days ?? 365 });
+      const summary = summarizePriceHistory(history);
+      output = options.json
+        ? JSON.stringify({ product, summary, points: history.points }, null, 2)
+        : renderPriceHistory(summary, { product, history });
     } else {
       throw new Error(`Unknown goma command: ${subcommand}`);
     }
@@ -551,9 +595,31 @@ export async function run(
       onProgress: progressReporter(stderr, options.json, "Checking goma.gg"),
     });
     clearProgress(stderr, options.json);
+
+    if (options.history) {
+      // Being cheaper than nemlig.com does not make it a good price, so ask
+      // what each winner has actually cost over the past year.
+      const withBest = result.rows.filter((row) => row.best?.productId);
+      let done = 0;
+      const report = progressReporter(stderr, options.json, "Reading price history");
+      await mapWithLimit(withBest, 4, async (row) => {
+        try {
+          const history = await goma.priceHistory(row.best.productId, { days: 365 });
+          row.best.history = summarizePriceHistory(history, { price: row.best.price });
+        } catch (error) {
+          row.best.history = { insufficientData: true, error: error.message };
+        }
+        report?.(++done, withBest.length);
+      });
+      clearProgress(stderr, options.json);
+    }
+
     output = options.json
       ? JSON.stringify(result, null, 2)
-      : renderComparison(result, { columns: stdout.columns ?? 100 });
+      : renderComparison(result, {
+        columns: stdout.columns ?? 100,
+        history: options.history,
+      });
   } else if (command === "habits") {
     if (positional.length) throw new Error("habits accepts no arguments");
     const analysis = await loadHistory(api, {
