@@ -1,98 +1,184 @@
 # nemlig CLI
 
-Uofficiel kommandolinjeklient til [nemlig.com](https://www.nemlig.com/) med
-prissammenligning via [goma.gg](https://goma.gg/).
+An unofficial command-line client for [nemlig.com](https://www.nemlig.com/).
+It supports public catalog search plus signed-in account, basket, order history,
+delivery-slot, and checkout-preparation flows, and cross-chain price comparison
+via [goma.gg](https://goma.gg/).
 
-Søg i varekataloget, hold styr på indkøbskurven, se ordrer og leveringstider —
-og få at vide, hvilke varer i kurven der er billigere hos Netto, Lidl, Bilka og
-12 andre kæder.
+## Let an AI agent do the shopping
 
-> English reference: [README.en.md](README.en.md)
+Every command speaks `--json`, everything that mutates requires `--yes`, and
+**no command can complete a purchase**. That combination makes this safe to
+hand to an agent — Claude Code, a cron agent, whatever you run — without giving
+it the ability to spend your money.
 
-## Lad din AI-agent stå for indkøbet
-
-Alle kommandoer kan svare med `--json`, alt, der ændrer noget, kræver `--yes`,
-og **ingen kommando kan gennemføre et køb**. Tilsammen gør det værktøjet
-velegnet til at give en agent — Claude Code, en cron-agent, hvad du nu bruger —
-adgang til dine dagligvarer, uden at den kan bruge dine penge.
-
-Giv den fx opgaven:
-
-> *"Se hvad vi købte sidst, fyld kurven med det samme igen, fortæl mig hvad der
-> er billigere hos de andre kæder, og reservér en gratis leveringstid til
-> weekenden."*
-
-Den kan løse det hele selv:
+Give it a task like *"see what we bought last time, refill the basket, tell me
+what's cheaper at the other chains, and reserve a free delivery slot this
+weekend"*, and it can do the whole thing:
 
 ```sh
-nemlig habits --json                        # hvad køber vi fast, og hvor tit?
-nemlig reorder --yes                        # læg det, der er ved at slippe op, i kurven
-nemlig compare --json                       # hvor er det billigere?
-nemlig delivery slots --days 7 --json       # find en tid til 0 kr.
-nemlig delivery select <tid-id> --yes
-nemlig checkout status                      # mangler der noget?
+nemlig habits --json                        # what do we buy regularly, how often?
+nemlig reorder --yes                        # basket what is running out
+nemlig compare --json                       # where is it cheaper?
+nemlig delivery slots --days 7 --json       # find a 0 kr. slot
+nemlig delivery select <timeslot-id> --yes
+nemlig checkout status                      # anything missing?
 ```
 
-Der ligger en præcis vejledning til agenter i [AGENTS.md](AGENTS.md) med
-JSON-formater, exit-koder og færdige opskrifter.
+[AGENTS.md](AGENTS.md) is the precise reference for agents: exact JSON
+shapes, exit codes to branch on, safety rules, and working recipes.
 
-Det sidste skridt kan agenten derimod ikke tage. `checkout open` lægger kurven
-op i din standardbrowser, og betaling, handelsbetingelser og MobilePay klarer
-du selv — efter du har set totalen. Derfor kan du roligt lade en agent gå amok
-i varekataloget: det værste, den kan nå, er at fylde din kurv.
+The last step is the one it cannot take. `checkout open` hands the basket to
+your browser, and payment, terms, and MobilePay stay with you — after you have
+seen the total. The worst an agent can do is fill your basket.
 
-## Kom godt i gang
+The API calls were mapped from Firefox's Network Monitor. Cookies, bearer
+tokens, anti-forgery values, personal details, and basket contents were excluded
+from the saved capture.
 
-Kræver **Node.js 20 eller nyere**. Virker på macOS, Linux og Windows.
+## Requirements
+
+- Node.js 20 or newer
+- A web browser for the final checkout/payment step
+
+## Install
 
 ```sh
 git clone https://github.com/tobiasdosdal/Nemlig.com-CLI.git
 cd Nemlig.com-CLI
-npm link          # gør kommandoen "nemlig" tilgængelig overalt
+npm link          # puts "nemlig" on your PATH
 nemlig --help
 ```
 
-Vil du helst ikke installere den globalt, kan du nøjes med at køre
-`node src/cli.js <kommando>`.
-
-## Varekatalog (uden login)
+There are no dependencies to install. If you would rather not link it
+globally, run it in place:
 
 ```sh
-nemlig search kaffe --limit 5
-nemlig suggest kaff
-nemlig product 5035178
+node src/cli.js search "økologisk mælk" --limit 5
 ```
 
-`search` viser det vare-id, som resten af kommandoerne bruger.
-
-## Log ind
+## Public catalog
 
 ```sh
-nemlig account login dig@eksempel.dk
+nemlig search kaffe
+nemlig search kaffe --limit 5 --offset 20
+nemlig suggest kaff
+nemlig product 5035178
+nemlig product kaffe-oeko-5035178
+nemlig product https://www.nemlig.com/kaffe-oeko-5035178
+nemlig search kaffe --json | jq '.products[] | {Id, Name, Price}'
+```
+
+Product IDs used by basket commands are shown by `search` and `product`.
+Only the full slug is addressable on nemlig.com, so `product <id>` resolves the
+slug through search first — one extra request.
+
+Options accept `--limit 5` and `--limit=5`. Use `--` to end option parsing when
+a search term starts with a dash.
+
+## Account
+
+```sh
+nemlig account login you@example.com
 nemlig account status
 nemlig account logout
 ```
 
-Adgangskoden skrives skjult og gemmes **aldrig**. Kun session-cookies lægges på
-disken, og filen kan kun læses af dig selv:
+Login prompts for the password without echo. The password is sent only to
+`https://www.nemlig.com/webapi/login` and is never written to disk. Session
+cookies are saved to:
 
-| Styresystem | Placering |
+| Platform | Location |
 | --- | --- |
-| macOS og Linux | `~/.config/nemlig-cli/session.json` |
+| macOS/Linux | `~/.config/nemlig-cli/session.json` (or `$XDG_CONFIG_HOME`) |
 | Windows | `%APPDATA%\nemlig-cli\session.json` |
 
-## Den lærer af dine tidligere ordrer
+The directory is private and the session file is forced to mode `0600` on Unix.
+Writes go through a temporary file and a rename, so an interrupted run cannot
+leave a half-written session. Set `NEMLIG_CONFIG_DIR` to choose another
+directory.
 
-`habits` læser dine seneste ordrer og regner ud, hvad du køber fast, og hvor
-tit. Kadencen måles i **dage mellem køb** — ikke i "hver anden ordre" — for du
-handler ikke med faste mellemrum.
+The CLI cannot import a browser session, and browser-cookie export is
+intentionally avoided. `checkout open` simply hands the basket URL to your
+default browser, which is where you are already signed in.
+
+## Basket
+
+Basket writes require `--yes` so scripts do not mutate it accidentally.
+Quantities are absolute for `set` and incremental for `add`.
+
+```sh
+nemlig basket
+nemlig basket add 5035178 2 --yes
+nemlig basket set 5035178 3 --yes
+nemlig basket remove 5035178 --yes
+nemlig basket clear --yes
+```
+
+Basket commands also accept the slug form (`kaffe-oeko-5035178`), so output
+from `search` can be piped straight back in.
+
+`basket` shows the product count, per-line discounts, the bag/deposit/delivery
+breakdown, and the reserved delivery time. nemlig.com applies its minimum-order
+rule to the products subtotal rather than the grand total, so the warning is
+computed against `TotalProductsPrice`.
+
+Every command also accepts `--json` where it is useful.
+
+## Orders and delivery
+
+```sh
+nemlig orders
+nemlig orders --limit 20
+nemlig orders show <order-number>
+
+nemlig delivery slots --days 7
+nemlig delivery slots --all
+nemlig delivery slots --start 2026-07-27 --json
+nemlig delivery select <timeslot-id> --yes
+```
+
+`delivery slots` lists bookable slots grouped by day and hides sold-out ones;
+`--all` includes them. A slot the account has already reserved is always shown
+and marked `reserved`, even though nemlig.com reports it as unbookable. Slots
+marked `unattended` are the longer no-recipient-needed windows (`Type: 1` in the
+response) — that mapping is inferred from the capture, not documented.
+
+Selecting a slot reserves it through the site's
+`TryUpdateDeliveryTime` flow. Availability can change between listing and
+selection.
+
+## Checkout
+
+```sh
+nemlig checkout status
+nemlig checkout status --json
+nemlig checkout open
+```
+
+`checkout status` checks basket totals, address, timeslot, validation failures,
+current terms, and age restrictions, and explains each failed check. `checkout
+open` launches the site's basket page in your default browser.
+
+The CLI deliberately does **not** expose `PlaceOrderLoggedIn`. Payment,
+acceptance of the current terms, 3-D Secure/MobilePay, and the final order
+confirmation remain in your browser, where the total and delivery details are
+visible.
+
+## Learning from past orders
+
+`habits` reads your recent orders and works out what you buy regularly and how
+often. Cadence is measured in **days between purchases** rather than "every Nth
+order", because shopping trips are irregular — counting orders would make a
+weekly staple and a quarterly one look identical whenever they land in the same
+basket.
 
 ```sh
 nemlig habits
 nemlig habits --orders 20 --min-orders 3
-nemlig reorder                       # forslag; rører ikke kurven
-nemlig reorder --yes                 # læg forslaget i kurven
-nemlig reorder --from 1063490166 --yes   # gentag én bestemt ordre
+nemlig reorder                            # proposal only; the basket is untouched
+nemlig reorder --yes                      # apply it
+nemlig reorder --from 1063490166 --yes    # repeat one specific order
 ```
 
 ```text
@@ -102,47 +188,41 @@ Gulerødder øko.                  4/7      45 d     71 d ago      26 d ago
 Falke hvedemel øko.              5/7      47 d     36 d ago      in 11 d
 ```
 
-`reorder` foreslår kun, indtil du tilføjer `--yes`, og springer over det, der
-allerede ligger i kurven — så du kan køre den to gange uden at fordoble noget.
+Two limits are worth knowing:
 
-To ting er værd at vide: en vare, du kun har købt to gange, giver et gæt, ikke
-en kadence. Og en vare, du købte et par gange og så droppede, bliver markeret
-som opgivet i stedet for at stå som månedsvis forsinket — den kommer ikke med i
-`reorder`.
+- The interval is the **median** gap between purchases, so it shrugs off one
+  holiday-sized outlier — but two purchases is a guess, not a cadence. Raise
+  `--min-orders` for a stricter view.
+- A product bought a few times and then dropped would otherwise read as months
+  overdue. Past twice its own interval it is treated as **lapsed** and kept out
+  of `reorder`; `habits` lists those separately.
 
-## Kurv, ordrer og levering
+`reorder` skips anything already in the basket, so running it twice adds
+nothing the second time.
 
-Alt, der ændrer din konto, kræver `--yes`, så et script ikke kommer til at rette
-i kurven ved et uheld. `add` lægger til det, der allerede ligger i kurven, mens
-`set` sætter et bestemt antal.
+## Price comparison (goma.gg)
 
-```sh
-nemlig basket
-nemlig basket add 5035178 2 --yes     # to mere end du havde
-nemlig basket set 5035178 3 --yes     # præcis tre
-nemlig basket remove 5035178 --yes
-
-nemlig orders
-nemlig orders show <ordrenummer>
-
-nemlig delivery slots --days 5        # kun ledige tider; --all viser de udsolgte
-nemlig delivery select <tid-id> --yes
-```
-
-## Prissammenligning med goma.gg
-
-`compare` slår hver vare i kurven op på goma.gg og viser, hvor den er billigst
-uden for nemlig.com. Priserne regnes om til kilo-, liter- eller stykpris, så
-pakker i forskellig størrelse kan sammenlignes.
+goma.gg tracks grocery offers across 16 Danish chains, nemlig.com included.
 
 ```sh
-nemlig compare
-nemlig compare --store Netto --store Lidl
-nemlig goma search kaffe --sale --sort discount
 nemlig goma stores
+nemlig goma search kaffe --sale --sort discount
+nemlig goma search "hakkede tomater" --store Netto --store Lidl
+nemlig compare
+nemlig compare --store "REMA 1000" --json
 ```
 
-Sådan ser det ud:
+`compare` looks up every basket line and reports the cheapest comparable
+alternative outside nemlig.com. Because the two catalogues share no product
+IDs, lines are matched on name similarity and pack size:
+
+- Prices are normalised to a base unit (g, ml, or piece), so a 375 g jar can be
+  compared against a 800 g one.
+- Matches are rated `high`, `medium`, or `low`; only `high` and `medium` count
+  toward the savings estimate, and `medium` rows are printed with a `?`.
+- Savings scale to the quantity actually in your basket.
+- A line whose pack size cannot be parsed is reported as unmatched rather than
+  silently skipped.
 
 ```text
 PRODUCT                           NEMLIG           BEST             STORE         SAVE
@@ -160,61 +240,51 @@ Estimated saving:  79,42 kr.
 13 of 15 lines matched confidently · 2 unmatched
 ```
 
-Bemærk, at varerne kædes sammen ud fra navn og størrelse — ikke ud fra
-stregkode. Linjer med `?` er usikre match, og de tæller kun med, fordi prisen
-per kilo er sammenlignelig; pakken er en anden. Se derfor beløbet som et
-overslag, ikke som et tilbud.
+The `?` marks a medium-confidence match: the per-kilo maths is right, but the
+pack is a different size. Treat the total as a guide, not a quote. `--sort` accepts `relevance`,
+`price-asc`, `price-desc`, `discount`, `name-asc`, and `name-desc`.
 
-## Betalingen foregår i browseren
+The client uses the publishable, RLS-protected key that goma.gg's own web app
+ships with, and opts out of their search analytics. goma.gg also offers a
+sanctioned partner Data API (goma@goma.gg) if you need a contractual footing.
 
-```sh
-nemlig checkout status     # er ordren klar? minimumskøb, adresse, leveringstid
-nemlig checkout open
-```
+## Environment
 
-CLI'en sender **aldrig** selve bestillingen. `checkout open` lægger blot kurven
-op i din standardbrowser — den du i forvejen er logget ind i. Betaling,
-godkendelse af handelsbetingelser og 3-D Secure/MobilePay foregår dér, hvor du
-når at se totalen først.
-
-## Indstillinger
-
-| Variabel | Betydning |
+| Variable | Effect |
 | --- | --- |
-| `NEMLIG_CONFIG_DIR` | Mappe til `session.json` |
-| `NEMLIG_TIMEOUT_MS` | Hvor længe der ventes på svar, som udgangspunkt `20000` |
-| `NEMLIG_RETRIES` | Antal forsøg ved 429/5xx, som udgangspunkt `2` |
-| `NEMLIG_DEBUG` | Vis hele fejlsporet |
-| `GOMA_API_KEY` | Overskriv goma.gg-nøglen, hvis den bliver skiftet ud |
+| `NEMLIG_CONFIG_DIR` | Directory holding `session.json` |
+| `NEMLIG_TIMEOUT_MS` | Per-request timeout, default `20000` |
+| `NEMLIG_RETRIES` | Retries on 429/5xx for reads, default `2` |
+| `NEMLIG_DEBUG` | Print stack traces on failure |
+| `GOMA_API_KEY` | Override the public goma.gg key if it rotates |
+| `GOMA_API_ORIGIN` | Override the goma.gg API origin |
 
-Kurven forsøges aldrig skrevet to gange, så et gentaget forsøg kan ikke komme
-til at fordoble en varelinje.
+Basket writes are never retried, so a retry cannot double a line.
 
-Afslutningskoder: `0` gik godt · `2` ikke logget ind · `3` fejl hos nemlig.com
-eller goma.gg · `64` forkert brug.
+## Exit codes
 
-## Udvikling
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `2` | Not signed in, or the session expired |
+| `3` | nemlig.com or goma.gg failed, timed out, or was unreachable |
+| `64` | Bad usage: unknown command, option, or argument |
+
+## Verify
 
 ```sh
-npm test        # 96 tests, ingen kald ud af huset
+npm test
 npm run check
 ```
 
-`--json` virker på stort set alle kommandoer og giver rå JSON til `jq` og
-scripts:
+The suite is hermetic — every network call is stubbed, so tests never reach
+nemlig.com or goma.gg. CI runs them on Node 20, 22, and 24 across Linux, macOS,
+and Windows.
 
-```sh
-nemlig compare --json | jq -r '.rows[] | select(.cheaper) | "\(.saving|floor) kr  \(.line.name)"'
-```
+## Caveats
 
-## Forbehold
-
-Hverken nemlig.com eller goma.gg udgiver de her endpoints som et offentligt,
-stabilt API, så de kan laves om uden varsel. Kortlægningen ligger i
-[`docs/network-capture.json`](docs/network-capture.json) og
-[`docs/goma-api.json`](docs/goma-api.json). Har du brug for en aftale på skrift,
-tilbyder goma.gg et officielt Data API til partnere (goma@goma.gg).
-
-Projektet er hverken tilknyttet nemlig.com eller goma.gg.
-
-MIT-licens.
+The sanitized request inventory is in
+[`docs/network-capture.json`](docs/network-capture.json), and the goma.gg one in
+[`docs/goma-api.json`](docs/goma-api.json). Neither site publishes these web-app
+endpoints as a stable public API, so they can change without notice. This
+project is not affiliated with nemlig.com or goma.gg.
