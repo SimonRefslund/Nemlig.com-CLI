@@ -593,32 +593,46 @@ export function renderCheckoutStatus(status) {
   const ready = status.readiness;
   const basket = status.basket;
   const shortfall = minimumShortfall(basket);
+
+  // Each check carries what to show when it passes and what to show when it
+  // fails. Keeping those apart matters: clearing the basket drops the
+  // reservation while FormattedDeliveryTime still holds the old window, and
+  // printing it next to a ✗ would contradict the check itself.
   const checks = [
-    ["Basket has items", ready.hasItems, null],
-    [
-      "Minimum total",
-      ready.minimumTotalValid,
-      shortfall == null ? null : `${formatPrice(shortfall)} short of ${
+    { label: "Basket has items", ok: ready.hasItems },
+    {
+      label: "Minimum total",
+      ok: ready.minimumTotalValid,
+      whenFailed: shortfall == null ? null : `${formatPrice(shortfall)} short of ${
         formatPrice(basket?.MinimumOrderTotal)
       }`,
-    ],
-    ["Maximum total", ready.maximumTotalValid, null],
-    ["Delivery address", ready.hasDeliveryAddress, shortAddress(basket?.DeliveryAddress)],
-    ["Reserved timeslot", ready.hasReservedTimeslot, basket?.FormattedDeliveryTime ?? null],
-    [
-      "No validation failures",
-      ready.validationFailures.length === 0,
-      ready.validationFailures.length
-        ? ready.validationFailures
-          .map((failure) => failure?.Message || failure?.ErrorMessage || "see --json")
-          .join("; ")
-        : null,
-    ],
+    },
+    { label: "Maximum total", ok: ready.maximumTotalValid },
+    {
+      label: "Delivery address",
+      ok: ready.hasDeliveryAddress,
+      whenOk: shortAddress(basket?.DeliveryAddress),
+      whenFailed: "no address on the basket",
+    },
+    {
+      label: "Reserved timeslot",
+      ok: ready.hasReservedTimeslot,
+      whenOk: basket?.FormattedDeliveryTime ?? null,
+      whenFailed: "no slot reserved; run: nemlig delivery slots",
+    },
+    {
+      label: "No validation failures",
+      ok: ready.validationFailures.length === 0,
+      whenFailed: ready.validationFailures
+        .map((failure) => failure?.Message || failure?.ErrorMessage || "see --json")
+        .join("; ") || null,
+    },
   ];
 
-  const lines = checks.map(([label, value, detail]) =>
-    `${value ? "✓" : "✗"} ${label}${detail ? ` — ${detail}` : ""}`
-  );
+  const lines = checks.map(({ label, ok, whenOk, whenFailed }) => {
+    const detail = ok ? whenOk : whenFailed;
+    return `${ok ? "✓" : "✗"} ${label}${detail ? ` — ${detail}` : ""}`;
+  });
 
   const rows = [];
   if (Number.isFinite(basket?.DeliveryPrice)) {

@@ -168,3 +168,25 @@ test("checkout status explains why a check failed", () => {
   assert.match(output, /✓ Reserved timeslot — søn\. 26\/07 kl\. 14-18/);
   assert.match(output, /Delivery fee:\s+20,00/);
 });
+
+test("a failed check never shows a detail that contradicts it", () => {
+  // Clearing a basket drops the reservation but leaves FormattedDeliveryTime
+  // populated, which previously printed "✗ Reserved timeslot — søn. 26/07".
+  const output = renderCheckoutStatus({
+    checkoutUrl: "https://www.nemlig.com/basket",
+    readiness: {
+      hasItems: false,
+      minimumTotalValid: false,
+      maximumTotalValid: true,
+      hasDeliveryAddress: false,
+      hasReservedTimeslot: false,
+      validationFailures: [],
+    },
+    basket: { ...basket, FormattedDeliveryTime: "søn. 26/07 kl. 14-18" },
+  });
+
+  assert.match(output, /✗ Reserved timeslot — no slot reserved/);
+  assert.doesNotMatch(output, /✗ Reserved timeslot — søn/);
+  assert.match(output, /✗ Delivery address — no address on the basket/);
+  assert.doesNotMatch(output, /✗ Delivery address — Kronprinsesse/);
+});
