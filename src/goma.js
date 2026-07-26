@@ -45,10 +45,12 @@ export const GOMA_SORTS = {
 };
 
 export class GomaApiError extends Error {
-  constructor(message, { status, cause } = {}) {
+  /** `usage: true` marks a bad argument rather than a goma.gg failure. */
+  constructor(message, { status, cause, usage = false } = {}) {
     super(message, { cause });
     this.name = "GomaApiError";
     this.status = status;
+    this.usage = usage;
   }
 }
 
@@ -61,6 +63,7 @@ export function resolveStore(input) {
   if (!match) {
     throw new GomaApiError(
       `Unknown store "${input}". Known stores: ${GOMA_STORES.join(", ")}`,
+      { usage: true },
     );
   }
   return match;
@@ -98,6 +101,7 @@ export class GomaApi {
     if (!orderBy) {
       throw new GomaApiError(
         `Unknown sort "${sort}". Use one of: ${Object.keys(GOMA_SORTS).join(", ")}`,
+        { usage: true },
       );
     }
 

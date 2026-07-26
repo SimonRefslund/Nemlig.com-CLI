@@ -445,7 +445,7 @@ export function renderDeliveryDays(result, { all = false } = {}) {
     );
   }
 
-  return [...sections, "", footer.join(" · ")].join("\n\n");
+  return [...sections, footer.join(" · ")].join("\n\n");
 }
 
 function packLabel(pack) {

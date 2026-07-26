@@ -140,6 +140,16 @@ test("empty delivery responses say so rather than looking like a parse failure",
   assert.match(renderDeliveryDays({ DayRangeHours: [] }), /No delivery days returned/);
 });
 
+test("delivery output has no run of blank lines", () => {
+  for (const output of [
+    renderDeliveryDays(deliveryDays),
+    renderDeliveryDays(deliveryDays, { all: true }),
+  ]) {
+    assert.doesNotMatch(output, /\n{3,}/, "sections must be separated by one blank line");
+    assert.doesNotMatch(output, /\n\s+$/);
+  }
+});
+
 test("checkout status explains why a check failed", () => {
   const output = renderCheckoutStatus({
     checkoutUrl: "https://www.nemlig.com/basket",

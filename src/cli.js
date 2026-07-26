@@ -523,7 +523,8 @@ export const EXIT = {
 /** Maps a thrown error onto a stable exit code scripts can branch on. */
 export function exitCodeFor(error) {
   const isApiError = error?.name === "NemligApiError" || error?.name === "GomaApiError";
-  if (!isApiError) return EXIT.usage;
+  // A rejected store or sort key is a typo, not an upstream failure.
+  if (!isApiError || error.usage) return EXIT.usage;
   if (error.status === 401 || error.status === 403) return EXIT.auth;
   return EXIT.upstream;
 }

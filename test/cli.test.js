@@ -319,6 +319,8 @@ test("exit codes distinguish usage, auth, and upstream failures", () => {
   assert.equal(exitCodeFor(new NemligApiError("boom", { status: 500 })), EXIT.upstream);
   assert.equal(exitCodeFor(new GomaApiError("boom", { status: 503 })), EXIT.upstream);
   assert.equal(exitCodeFor(new NemligApiError("offline")), EXIT.upstream);
+  // A bad --store or --sort is the caller's typo, not an upstream failure.
+  assert.equal(exitCodeFor(new GomaApiError("bad store", { usage: true })), EXIT.usage);
 });
 
 test("an unsupported Node.js release is reported clearly", () => {
