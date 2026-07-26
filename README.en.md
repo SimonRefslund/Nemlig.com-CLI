@@ -7,6 +7,31 @@ via [goma.gg](https://goma.gg/).
 
 > Dansk læs-mig: [README.md](README.md)
 
+## Let an AI agent do the shopping
+
+Every command speaks `--json`, everything that mutates requires `--yes`, and
+**no command can complete a purchase**. That combination makes this safe to
+hand to an agent — Claude Code, a cron agent, whatever you run — without giving
+it the ability to spend your money.
+
+Give it a task like *"see what we bought last time, refill the basket, tell me
+what's cheaper at the other chains, and reserve a free delivery slot this
+weekend"*, and it can do the whole thing:
+
+```sh
+nemlig orders --limit 1 --json              # what was ordered last time?
+nemlig orders show <order-number> --json    # the individual lines
+nemlig basket add <product-id> <qty> --yes  # refill the basket
+nemlig compare --json                       # where is it cheaper?
+nemlig delivery slots --days 7 --json       # find a 0 kr. slot
+nemlig delivery select <timeslot-id> --yes
+nemlig checkout status                      # anything missing?
+```
+
+The last step is the one it cannot take. `checkout open` hands the basket to
+your browser, and payment, terms, and MobilePay stay with you — after you have
+seen the total. The worst an agent can do is fill your basket.
+
 The API calls were mapped from Firefox's Network Monitor. Cookies, bearer
 tokens, anti-forgery values, personal details, and basket contents were excluded
 from the saved capture.
