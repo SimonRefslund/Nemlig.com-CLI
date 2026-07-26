@@ -73,8 +73,8 @@ matches your nemlig.com basket to goma.gg products by name and pack size and
 reports the cheapest comparable alternative — it is a guide, not a quote.
 
 Passwords are prompted without echo and are never stored. Session cookies are
-stored with user-only permissions. Orders are always placed in Firefox; this
-CLI never submits the final purchase request.
+stored with user-only permissions. Orders are always placed in your browser;
+this CLI never submits the final purchase request.
 
 Environment:
   NEMLIG_CONFIG_DIR   directory for session.json (default ~/.config/nemlig-cli)
@@ -227,21 +227,42 @@ function spawn([file, args]) {
   });
 }
 
-export async function openInFirefox(url) {
-  const [preferred, fallback] = process.platform === "darwin"
-    ? [["open", ["-a", "Firefox", url]], ["open", [url]]]
-    : process.platform === "win32"
-    ? [["cmd.exe", ["/c", "start", "", url]], null]
-    : [["firefox", [url]], ["xdg-open", [url]]];
+/**
+ * Hands the URL to whatever browser the system considers default, so checkout
+ * lands in the browser the user is already signed in to. Linux has no single
+ * opener, so the usual candidates are tried in turn; wslview covers WSL, where
+ * xdg-open exists but cannot reach the Windows desktop.
+ */
+export function browserCandidates(url, platform = process.platform) {
+  if (platform === "darwin") return [["open", [url]]];
+  if (platform === "win32") return [["cmd.exe", ["/c", "start", "", url]]];
+  return [
+    ["xdg-open", [url]],
+    ["wslview", [url]],
+    ["gio", ["open", url]],
+    ["x-www-browser", [url]],
+  ];
+}
 
-  try {
-    await spawn(preferred);
-    return "Firefox";
-  } catch (error) {
-    if (!fallback) throw error;
-    await spawn(fallback);
-    return "your default browser";
+export async function openInBrowser(
+  url,
+  { platform = process.platform, run = spawn } = {},
+) {
+  const candidates = browserCandidates(url, platform);
+
+  let lastError;
+  for (const candidate of candidates) {
+    try {
+      await run(candidate);
+      return "your browser";
+    } catch (error) {
+      lastError = error;
+    }
   }
+  throw new Error(
+    `Could not open a browser (${lastError?.message ?? "no opener found"}). ` +
+      `Open this URL yourself: ${url}`,
+  );
 }
 
 function requireYes(options, action) {
@@ -276,7 +297,7 @@ export async function run(
     stdout = process.stdout,
     stderr = process.stderr,
     readPassword = readSecret,
-    openUrl = openInFirefox,
+    openUrl = openInBrowser,
   } = {},
 ) {
   if (!argv.length || argv.includes("--help") || argv.includes("-h")) {
@@ -453,11 +474,11 @@ export async function run(
         settings.BasketPageUrl || "/",
         "https://www.nemlig.com",
       ).href;
-      const browser = (await openUrl(url)) || "Firefox";
+      const browser = (await openUrl(url)) || "your browser";
       output = `Opened ${browser}: ${url}`;
     } else if (subcommand === "place") {
       throw new Error(
-        "Final order placement is intentionally completed in Firefox (run: nemlig checkout open)",
+        "Final order placement is intentionally completed in your browser (run: nemlig checkout open)",
       );
     } else {
       throw new Error(`Unknown checkout command: ${subcommand}`);

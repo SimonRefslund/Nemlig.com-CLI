@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { EXIT, exitCodeFor, internals, parseArgs, run } from "../src/cli.js";
+import {
+  EXIT,
+  browserCandidates,
+  exitCodeFor,
+  internals,
+  openInBrowser,
+  parseArgs,
+  run,
+} from "../src/cli.js";
 import { GomaApiError } from "../src/goma.js";
 import { NemligApiError } from "../src/api.js";
 
@@ -210,17 +218,59 @@ test("checkout open delegates to the browser without placing an order", async ()
     stdout,
     openUrl: async (url) => {
       opened = url;
-      return "Firefox";
+      return "your browser";
     },
   });
   assert.equal(opened, "https://www.nemlig.com/basket");
-  assert.match(stdout.value, /Opened Firefox/);
+  assert.match(stdout.value, /Opened your browser/);
+});
+
+test("each platform gets its default-browser opener, not a named browser", () => {
+  const url = "https://www.nemlig.com/basket";
+  assert.deepEqual(browserCandidates(url, "darwin"), [["open", [url]]]);
+  assert.deepEqual(browserCandidates(url, "win32"), [
+    ["cmd.exe", ["/c", "start", "", url]],
+  ]);
+  assert.deepEqual(browserCandidates(url, "linux")[0], ["xdg-open", [url]]);
+
+  // No opener may hard-code a browser; the system default is the whole point.
+  for (const platform of ["darwin", "win32", "linux"]) {
+    for (const [file] of browserCandidates(url, platform)) {
+      assert.doesNotMatch(file, /firefox|chrome|safari|edge/i);
+    }
+  }
+});
+
+test("Linux falls through its openers until one works", async () => {
+  const tried = [];
+  const browser = await openInBrowser("https://example.com", {
+    platform: "linux",
+    run: async ([file]) => {
+      tried.push(file);
+      if (file !== "wslview") throw new Error(`${file}: not found`);
+    },
+  });
+  assert.deepEqual(tried, ["xdg-open", "wslview"]);
+  assert.equal(browser, "your browser");
+});
+
+test("when no browser can be opened the URL is printed for the user", async () => {
+  await assert.rejects(
+    () =>
+      openInBrowser("https://www.nemlig.com/basket", {
+        platform: "linux",
+        run: async () => {
+          throw new Error("not found");
+        },
+      }),
+    /Open this URL yourself: https:\/\/www\.nemlig\.com\/basket/,
+  );
 });
 
 test("checkout place is intentionally unavailable", async () => {
   await assert.rejects(
     () => run(["checkout", "place"], { api: {}, stdout: outputBuffer() }),
-    /completed in Firefox/,
+    /completed in your browser/,
   );
 });
 

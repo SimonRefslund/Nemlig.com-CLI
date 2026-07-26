@@ -648,6 +648,6 @@ export function renderCheckoutStatus(status) {
     "",
     ...summaryRows(rows),
     "",
-    `Continue securely in Firefox: ${status.checkoutUrl}`,
+    `Continue securely in your browser: ${status.checkoutUrl}`,
   ].join("\n");
 }

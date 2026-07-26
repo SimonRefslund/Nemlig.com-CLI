@@ -35,9 +35,9 @@ nemlig checkout status                      # mangler der noget?
 ```
 
 Det sidste skridt kan agenten derimod ikke tage. `checkout open` lægger kurven
-op i browseren, og betaling, handelsbetingelser og MobilePay klarer du selv —
-efter du har set totalen. Derfor kan du roligt lade en agent gå amok i
-varekataloget: det værste, den kan nå, er at fylde din kurv.
+op i din standardbrowser, og betaling, handelsbetingelser og MobilePay klarer
+du selv — efter du har set totalen. Derfor kan du roligt lade en agent gå amok
+i varekataloget: det værste, den kan nå, er at fylde din kurv.
 
 ## Kom godt i gang
 
@@ -141,9 +141,10 @@ nemlig checkout status     # er ordren klar? minimumskøb, adresse, leveringstid
 nemlig checkout open
 ```
 
-CLI'en sender **aldrig** selve bestillingen. Betaling, godkendelse af
-handelsbetingelser og 3-D Secure/MobilePay foregår i browseren, hvor du når at
-se totalen først.
+CLI'en sender **aldrig** selve bestillingen. `checkout open` lægger blot kurven
+op i din standardbrowser — den du i forvejen er logget ind i. Betaling,
+godkendelse af handelsbetingelser og 3-D Secure/MobilePay foregår dér, hvor du
+når at se totalen først.
 
 ## Indstillinger
 

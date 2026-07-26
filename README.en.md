@@ -39,7 +39,7 @@ from the saved capture.
 ## Requirements
 
 - Node.js 20 or newer
-- Firefox for the final checkout/payment flow
+- A web browser for the final checkout/payment step
 
 ## Install
 
@@ -106,8 +106,9 @@ directory.
 
 Basket writes are never retried, so a retry cannot double a line.
 
-The CLI cannot import the already-open Firefox session. Browser-cookie export is
-intentionally avoided; `checkout open` reuses Firefox's own signed-in session.
+The CLI cannot import a browser session, and browser-cookie export is
+intentionally avoided. `checkout open` simply hands the basket URL to your
+default browser, which is where you are already signed in.
 
 ## Basket
 
@@ -165,12 +166,12 @@ nemlig checkout open
 
 `checkout status` checks basket totals, address, timeslot, validation failures,
 current terms, and age restrictions, and explains each failed check. `checkout
-open` launches the site's basket page in Firefox, falling back to the default
-browser if Firefox is not installed.
+open` launches the site's basket page in your default browser.
 
 The CLI deliberately does **not** expose `PlaceOrderLoggedIn`. Payment,
 acceptance of the current terms, 3-D Secure/MobilePay, and the final order
-confirmation remain in Firefox where the total and delivery details are visible.
+confirmation remain in your browser, where the total and delivery details are
+visible.
 
 ## Price comparison (goma.gg)
 
