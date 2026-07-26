@@ -174,9 +174,9 @@ test("orders show renders a readable order instead of raw JSON", async () => {
   const stdout = outputBuffer();
   const api = {
     async getOrder(orderNumber) {
-      assert.equal(orderNumber, "1063490166");
+      assert.equal(orderNumber, "1000000001");
       return {
-        OrderNumber: "1063490166",
+        OrderNumber: "1000000001",
         Total: 691.13,
         SubTotal: 636.33,
         NumberOfProducts: 41,
@@ -188,8 +188,8 @@ test("orders show renders a readable order instead of raw JSON", async () => {
     },
   };
 
-  await run(["orders", "show", "1063490166"], { api, stdout });
-  assert.match(stdout.value, /Order 1063490166/);
+  await run(["orders", "show", "1000000001"], { api, stdout });
+  assert.match(stdout.value, /Order 1000000001/);
   assert.match(stdout.value, /4 × Miami Vice Pale Ale/);
   assert.match(stdout.value, /Sat, 18 Jul 2026 17:00–19:00/);
   assert.match(stdout.value, /Total:\s+691,13/);

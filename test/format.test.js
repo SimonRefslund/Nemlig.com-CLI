@@ -60,7 +60,7 @@ test("the minimum-order check is measured against the products subtotal", () => 
 test("order history shows totals and delivery windows", () => {
   const output = renderOrders({
     Orders: [{
-      OrderNumber: "1063490166",
+      OrderNumber: "1000000001",
       Total: 691.13,
       Status: 3,
       DeliveryTime: { Start: "2026-07-18T17:00:00", End: "2026-07-18T19:00:00" },
@@ -70,7 +70,7 @@ test("order history shows totals and delivery windows", () => {
     NumberOfPages: 4,
   });
 
-  assert.match(output, /1063490166/);
+  assert.match(output, /1000000001/);
   assert.match(output, /Sat, 18 Jul 2026 17:00–19:00/);
   assert.match(output, /691,13/);
   // The numeric Status enum is undocumented, so it must not be shown as a label.
@@ -188,5 +188,5 @@ test("a failed check never shows a detail that contradicts it", () => {
   assert.match(output, /✗ Reserved timeslot — no slot reserved/);
   assert.doesNotMatch(output, /✗ Reserved timeslot — søn/);
   assert.match(output, /✗ Delivery address — no address on the basket/);
-  assert.doesNotMatch(output, /✗ Delivery address — Kronprinsesse/);
+  assert.doesNotMatch(output, /✗ Delivery address — Testvej/);
 });
