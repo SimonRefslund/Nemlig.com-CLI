@@ -1,0 +1,87 @@
+{
+  "format": "sanitized-request-inventory/1",
+  "capturedAt": "2026-07-26",
+  "target": "https://goma.gg/dagligvarer",
+  "scope": "Public offer search used by the CLI's `goma search` and `compare` commands.",
+  "notes": [
+    "goma.gg is a Danish grocery price-comparison service. Its web client talks to a Supabase (PostgREST) backend at https://api.goma.gg.",
+    "The apikey below is the publishable, row-level-security-protected key the public web client ships with; it grants no more than anonymous browsing of goma.gg does. Override it with GOMA_API_KEY if it rotates.",
+    "goma.gg offers a sanctioned partner Data API (goma@goma.gg). These endpoints are not published as a stable public API and can change without notice.",
+    "The CLI sends p_log_search=false and p_session_id=null so its lookups stay out of goma.gg's search analytics."
+  ],
+  "redactions": [
+    "No user account, session, or shopping-list data was captured; only anonymous catalogue search."
+  ],
+  "stores": [
+    "REMA 1000",
+    "Netto",
+    "365discount",
+    "Lidl",
+    "Wolt Market",
+    "Føtex",
+    "SuperBrugsen",
+    "MENY",
+    "Bilka",
+    "Kvickly",
+    "Brugsen",
+    "Spar",
+    "Løvbjerg",
+    "Nemlig",
+    "ABC Lavpris",
+    "Min Købmand"
+  ],
+  "requests": [
+    {
+      "method": "POST",
+      "url": "https://api.goma.gg/rest/v1/rpc/search_products_public_v1",
+      "status": 200,
+      "purpose": "Search grocery products and current offers across Danish chains",
+      "requestHeaders": [
+        "apikey: <publishable key>",
+        "authorization: Bearer <publishable key>",
+        "content-type: application/json"
+      ],
+      "requestFields": {
+        "p_search_term": "free-text query, empty string allowed when filtering",
+        "p_on_sale_only": "boolean",
+        "p_store_filter": "array of store names as spelled above, or null",
+        "p_department_filter": "array of department names, or null",
+        "p_category_filter": "array of category names, or null",
+        "p_labels_filter": "array of label names, or null",
+        "p_food_departments": "array of department names, or null",
+        "p_is_available_only": "boolean",
+        "p_my_products_only": "requires a signed-in goma.gg user; the CLI sends false",
+        "p_previously_bought_only": "requires a signed-in goma.gg user; the CLI sends false",
+        "p_order_by_clause": "one of: similarity DESC | current_price ASC NULLS LAST | current_price DESC NULLS LAST | is_on_sale DESC, discount_percentage DESC NULLS LAST, similarity DESC | product_name ASC NULLS LAST | product_name DESC NULLS LAST",
+        "p_limit_val": "integer",
+        "p_offset_val": "integer",
+        "p_session_id": "analytics session; the CLI sends null",
+        "p_log_search": "analytics opt-in; the CLI sends false",
+        "p_source": "analytics origin; the CLI sends null"
+      },
+      "responseFields": [
+        "products[].product_id",
+        "products[].product_name",
+        "products[].brand",
+        "products[].store_name",
+        "products[].current_price",
+        "products[].normal_price",
+        "products[].is_on_sale",
+        "products[].discount_percentage",
+        "products[].sale_valid_from",
+        "products[].sale_valid_to",
+        "products[].amount",
+        "products[].unit",
+        "products[].price_per_unit",
+        "products[].price_per_kilogram",
+        "products[].is_available",
+        "products[].department_name",
+        "products[].product_url",
+        "total_count",
+        "total_on_sale_count",
+        "departments",
+        "categories"
+      ]
+    }
+  ]
+}

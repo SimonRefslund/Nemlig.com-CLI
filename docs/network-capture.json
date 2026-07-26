@@ -1,0 +1,200 @@
+{
+  "format": "sanitized-devtools-capture",
+  "capturedAt": "2026-07-26T06:16:40+02:00",
+  "target": "https://www.nemlig.com/?search=kaffe",
+  "scope": "Anonymous catalog plus authenticated account, basket, order, delivery, and checkout-preparation traffic",
+  "redactions": [
+    "authorization header values",
+    "cookies",
+    "anti-forgery tokens",
+    "analytics requests",
+    "account identifiers and profile fields",
+    "basket contents and delivery address"
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "url": "https://www.nemlig.com/?GetAsJson=1",
+      "status": 200,
+      "purpose": "Bootstrap delivery-zone, timeslot, and content timestamps",
+      "responseFields": [
+        "Settings.DeliveryZoneId",
+        "Settings.TimeslotUtc",
+        "Settings.SitecorePublishedStamp",
+        "Settings.CombinedProductsAndSitecoreTimestamp"
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://www.nemlig.com/webapi/Token",
+      "status": 200,
+      "purpose": "Issue a short-lived anonymous catalog token",
+      "responseFields": [
+        "access_token",
+        "expires_in",
+        "token_type"
+      ]
+    },
+    {
+      "method": "GET",
+      "urlTemplate": "https://webapi.prod.knl.nemlig.it/searchgateway/api/quick?query={query}&correlationId={sitecorePublishedStamp}",
+      "status": 200,
+      "purpose": "Return search suggestions and matching categories",
+      "requestHeaders": [
+        "authorization: Bearer <redacted>",
+        "origin: https://www.nemlig.com",
+        "x-correlation-id: <generated>"
+      ],
+      "responseFields": [
+        "SearchQuery",
+        "Categories[]",
+        "Suggestions[]"
+      ]
+    },
+    {
+      "method": "GET",
+      "urlTemplate": "https://webapi.prod.knl.nemlig.it/searchgateway/api/search?query={query}&take={limit}&skip={offset}&recipeCount=0&timestamp={combinedTimestamp}&timeslotUtc={timeslotUtc}&deliveryZoneId={zoneId}&includeFavorites=0&TimeSlotId=0",
+      "status": 200,
+      "purpose": "Return public product search results",
+      "requestHeaders": [
+        "authorization: Bearer <redacted>",
+        "origin: https://www.nemlig.com",
+        "x-correlation-id: <generated>"
+      ],
+      "responseFields": [
+        "Products.Products[]",
+        "Products.Start",
+        "Products.NumFound",
+        "Facets",
+        "SearchQuery"
+      ]
+    },
+    {
+      "method": "GET",
+      "urlTemplate": "https://www.nemlig.com/{productSlug}?GetAsJson=1",
+      "status": 200,
+      "purpose": "Return a product-detail page as JSON",
+      "responseFields": [
+        "content[TemplateName=productdetailspot]"
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://www.nemlig.com/webapi/AntiForgery",
+      "status": 200,
+      "purpose": "Initialize CSRF cookies and the header value required for account mutations",
+      "responseFields": [
+        "Header",
+        "Value"
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://www.nemlig.com/webapi/v2/AppSettings/Website",
+      "status": 200,
+      "purpose": "Read public site routes including the current basket page URL",
+      "responseFields": [
+        "BasketPageUrl",
+        "LoginPageUrl",
+        "MyNemligPageUrl",
+        "MyNemligOrderHistoryPageUrl"
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://www.nemlig.com/webapi/login",
+      "status": 200,
+      "purpose": "Create an authenticated web session; the CLI never records the password",
+      "requestFields": [
+        "Username",
+        "Password",
+        "CheckForExistingProducts",
+        "DoMerge",
+        "AppInstalled",
+        "SaveExistingBasket"
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://www.nemlig.com/webapi/user/GetCurrentUser",
+      "status": 200,
+      "purpose": "Read signed-in account status",
+      "responseFields": [
+        "<profile fields redacted>"
+      ]
+    },
+    {
+      "method": "GET",
+      "url": "https://www.nemlig.com/webapi/basket/GetBasket",
+      "status": 200,
+      "purpose": "Read basket, totals, delivery address state, and reserved timeslot state",
+      "responseFields": [
+        "Lines[]",
+        "MealBoxes[]",
+        "Recipes[]",
+        "TotalPrice",
+        "IsMinTotalValid",
+        "IsMaxTotalValid",
+        "DeliveryAddress",
+        "DeliveryTimeSlot",
+        "ValidationFailures[]"
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://www.nemlig.com/webapi/basket/AddToBasket",
+      "status": 200,
+      "purpose": "Set an absolute product quantity",
+      "requestFields": [
+        "ProductId",
+        "quantity",
+        "OriginalProductId",
+        "AffectPartialQuantity",
+        "RecipeId",
+        "disableQuantityValidation"
+      ]
+    },
+    {
+      "method": "POST",
+      "url": "https://www.nemlig.com/webapi/basket/ClearBasket",
+      "status": 200,
+      "purpose": "Clear the basket after explicit CLI confirmation"
+    },
+    {
+      "method": "GET",
+      "urlTemplate": "https://www.nemlig.com/webapi/order/GetBasicOrderHistory?skip={offset}&take={limit}",
+      "status": 200,
+      "purpose": "List signed-in order history"
+    },
+    {
+      "method": "GET",
+      "urlTemplate": "https://www.nemlig.com/webapi/v2/Delivery/GetDeliveryDays?startDate={date}&showForSubscriptions=false&days={days}",
+      "status": 200,
+      "purpose": "List delivery days and timeslots"
+    },
+    {
+      "method": "POST",
+      "urlTemplate": "https://www.nemlig.com/webapi/Delivery/TryUpdateDeliveryTime?timeslotId={id}",
+      "status": 200,
+      "purpose": "Attempt to reserve a selected timeslot after explicit CLI confirmation"
+    },
+    {
+      "method": "GET",
+      "url": "https://www.nemlig.com/webapi/Checkout/GetTermsAndAgreements",
+      "status": 200,
+      "purpose": "Read current checkout terms"
+    },
+    {
+      "method": "GET",
+      "url": "https://www.nemlig.com/webapi/Checkout/GetAgeRestrictions",
+      "status": 200,
+      "purpose": "Read checkout age restrictions"
+    },
+    {
+      "method": "POST",
+      "url": "https://www.nemlig.com/webapi/Order/PlaceOrderLoggedIn",
+      "status": "not replayed",
+      "purpose": "Observed final purchase endpoint; deliberately excluded from CLI execution"
+    }
+  ]
+}
