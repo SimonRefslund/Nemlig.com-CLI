@@ -4,6 +4,32 @@ import path from "node:path";
 
 let writeCounter = 0;
 
+/**
+ * Windows fails a rename with EPERM/EACCES/EBUSY when the destination is
+ * momentarily held open — by a concurrent replace of the same file, by an
+ * indexer, or by antivirus. POSIX rename has no such window. Retrying briefly
+ * turns a transient collision back into the atomic replace it is meant to be.
+ */
+const RENAME_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+async function renameWithRetry(from, to, {
+  attempts = 10,
+  wait = defaultWait,
+  renameImpl = rename,
+} = {}) {
+  for (let attempt = 0;; attempt += 1) {
+    try {
+      await renameImpl(from, to);
+      return;
+    } catch (error) {
+      if (attempt >= attempts || !RENAME_RETRY_CODES.has(error.code)) throw error;
+      await wait(Math.min(10 * (attempt + 1), 100));
+    }
+  }
+}
+
+const defaultWait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function defaultConfigRoot() {
   if (process.env.NEMLIG_CONFIG_DIR) return process.env.NEMLIG_CONFIG_DIR;
   if (process.env.XDG_CONFIG_HOME) {
@@ -118,7 +144,7 @@ export class SessionStore {
         `${JSON.stringify({ version: 1, cookies }, null, 2)}\n`,
         { mode: 0o600 },
       );
-      await rename(temporary, this.filePath);
+      await renameWithRetry(temporary, this.filePath);
     } catch (error) {
       await unlink(temporary).catch(() => {});
       throw error;
@@ -135,4 +161,9 @@ export class SessionStore {
   }
 }
 
-export const internals = { defaultConfigRoot, defaultSessionPath, setCookieValues };
+export const internals = {
+  defaultConfigRoot,
+  defaultSessionPath,
+  renameWithRetry,
+  setCookieValues,
+};

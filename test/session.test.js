@@ -64,6 +64,59 @@ test("a concurrent save never leaves a half-written session", async () => {
   assert.match(parsed.cookies.Session, /^v\d$/);
 });
 
+function failingRename(code, failures) {
+  let calls = 0;
+  const impl = async () => {
+    calls += 1;
+    if (calls <= failures) {
+      const error = new Error(`${code}: operation not permitted, rename`);
+      error.code = code;
+      throw error;
+    }
+  };
+  return { impl, calls: () => calls };
+}
+
+test("a rename blocked by Windows is retried instead of surfacing", async () => {
+  // windows-latest hit EPERM here: the destination is briefly held open while
+  // a concurrent save replaces the same file. POSIX rename has no such window.
+  for (const code of ["EPERM", "EACCES", "EBUSY"]) {
+    const rename = failingRename(code, 2);
+    await internals.renameWithRetry("a.tmp", "b.json", {
+      wait: async () => {},
+      renameImpl: rename.impl,
+    });
+    assert.equal(rename.calls(), 3, `${code} should have been retried twice`);
+  }
+});
+
+test("a rename that keeps failing eventually gives up", async () => {
+  const rename = failingRename("EPERM", Infinity);
+  await assert.rejects(
+    () =>
+      internals.renameWithRetry("a.tmp", "b.json", {
+        attempts: 3,
+        wait: async () => {},
+        renameImpl: rename.impl,
+      }),
+    /EPERM/,
+  );
+  assert.equal(rename.calls(), 4, "initial attempt plus three retries");
+});
+
+test("a rename failure that is not transient propagates at once", async () => {
+  const rename = failingRename("ENOENT", Infinity);
+  await assert.rejects(
+    () =>
+      internals.renameWithRetry("missing.tmp", "session.json", {
+        wait: async () => {},
+        renameImpl: rename.impl,
+      }),
+    /ENOENT/,
+  );
+  assert.equal(rename.calls(), 1, "a missing source must not be retried");
+});
+
 test("the config directory follows the platform convention", () => {
   const previous = { ...process.env };
   try {
