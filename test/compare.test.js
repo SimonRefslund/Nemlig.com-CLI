@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -10,6 +11,154 @@ import {
   toBaseAmount,
   variantMismatch,
 } from "../src/compare.js";
+
+const { cases: compareCases } = JSON.parse(
+  readFileSync(new URL("./fixtures/compare-cases.json", import.meta.url), "utf8"),
+);
+
+const expectedFamilies = [
+  "exact same-product/same-pack",
+  "unrelated products",
+  "organic source versus organic candidate",
+  "organic source versus conventional candidate",
+  "400 g / 240 g canned product",
+  "950 g demand versus 700 g rival",
+  "same name in two pack sizes",
+  "high-confidence plus cheaper medium-confidence candidates",
+];
+
+function fixtureCandidateForScoring(candidate) {
+  return {
+    name: candidate.product_name,
+    brand: candidate.brand,
+    pack: toBaseAmount(candidate.amount, candidate.unit),
+  };
+}
+
+function fixtureGoma(products) {
+  return {
+    async search() {
+      return { products, total: products.length, onSale: 0 };
+    },
+  };
+}
+
+test("grocery decision fixtures cover the eight unique case families", () => {
+  assert.deepEqual(compareCases.map(({ family }) => family), expectedFamilies);
+  assert.equal(new Set(compareCases.map(({ id }) => id)).size, compareCases.length);
+
+  for (const fixture of compareCases) {
+    assert.match(fixture.id, /^[a-z0-9-]+$/);
+    assert.ok(Number.isFinite(fixture.source.Price), `${fixture.id}: finite source price`);
+    assert.ok(Number.isFinite(fixture.source.Quantity), `${fixture.id}: finite source quantity`);
+    assert.equal(
+      fixture.candidates.length,
+      fixture.expectedCurrent.confidences.length,
+      `${fixture.id}: one confidence per candidate`,
+    );
+
+    for (const [index, candidate] of fixture.candidates.entries()) {
+      assert.match(candidate.product_id, /^fixture-candidate-/);
+      assert.ok(Number.isFinite(candidate.current_price), `${fixture.id}: finite candidate price`);
+      assert.ok(Number.isFinite(candidate.quantity), `${fixture.id}: finite candidate quantity`);
+      assert.ok(
+        ["low", "medium", "high"].includes(fixture.expectedCurrent.confidences[index]),
+        `${fixture.id}: explicit candidate confidence`,
+      );
+    }
+  }
+});
+
+test("fixture descriptions characterize current pack parsing", () => {
+  for (const fixture of compareCases) {
+    assert.deepEqual(
+      parsePackSize(fixture.source.Description),
+      fixture.expectedCurrent.parsedPack,
+      fixture.id,
+    );
+  }
+});
+
+test("fixture names characterize current similarity", () => {
+  for (const fixture of compareCases) {
+    const actual = fixture.candidates.map((candidate) =>
+      similarity(fixture.source.Name, candidate.product_name));
+    assert.deepEqual(actual, fixture.expectedCurrent.similarities, fixture.id);
+  }
+});
+
+test("fixture candidates characterize current confidence scoring", () => {
+  for (const fixture of compareCases) {
+    const line = describeBasketLine(fixture.source);
+    const scores = fixture.candidates.map((candidate) =>
+      scoreCandidate(line, fixtureCandidateForScoring(candidate)));
+    assert.deepEqual(
+      scores.map(({ confidence }) => confidence),
+      fixture.expectedCurrent.confidences,
+      `${fixture.id}: confidence`,
+    );
+    assert.deepEqual(
+      scores.map(({ comparable }) => comparable),
+      fixture.expectedCurrent.comparables,
+      `${fixture.id}: comparable`,
+    );
+  }
+});
+
+test("fixture cases characterize current basket comparisons", async () => {
+  for (const fixture of compareCases) {
+    const { rows } = await compareBasket({
+      TotalPrice: fixture.source.Price,
+      Lines: [fixture.source],
+    }, fixtureGoma(fixture.candidates));
+    const [row] = rows;
+
+    assert.equal(row.best?.productId ?? null, fixture.expectedCurrent.bestProductId, fixture.id);
+    assert.equal(row.best?.confidence ?? null, fixture.expectedCurrent.bestConfidence, fixture.id);
+    assert.equal(row.cheaper, fixture.expectedCurrent.cheaper, fixture.id);
+    assert.equal(
+      row.saving.toFixed(2),
+      fixture.expectedCurrent.saving.toFixed(2),
+      fixture.id,
+    );
+  }
+});
+
+test("current behavior: organic words are stop words during matching", () => {
+  const organic = compareCases.find(({ id }) => id === "organic-source-organic-candidate");
+  const conventional = compareCases.find(
+    ({ id }) => id === "organic-source-conventional-candidate",
+  );
+
+  assert.equal(similarity(organic.source.Name, organic.candidates[0].product_name), 1);
+  assert.equal(similarity(conventional.source.Name, conventional.candidates[0].product_name), 1);
+  assert.equal(
+    scoreCandidate(
+      describeBasketLine(conventional.source),
+      fixtureCandidateForScoring(conventional.candidates[0]),
+    ).confidence,
+    "high",
+  );
+});
+
+test("current behavior: savings allow fractional rival packs", async () => {
+  const fixture = compareCases.find(({ id }) => id === "demand-950g-rival-700g");
+  const { rows } = await compareBasket({
+    TotalPrice: fixture.source.Price,
+    Lines: [fixture.source],
+  }, fixtureGoma(fixture.candidates));
+
+  // The estimate prices exactly 950 g at the rival's per-gram rate (1.36 packs),
+  // rather than requiring the purchase of two whole 700 g packs.
+  assert.equal(rows[0].saving.toFixed(2), "4.75");
+});
+
+test("current behavior: canned descriptions use the first weight", () => {
+  const fixture = compareCases.find(
+    ({ id }) => id === "canned-product-gross-and-drained-weight",
+  );
+  assert.deepEqual(parsePackSize(fixture.source.Description), { amount: 400, base: "g" });
+});
 
 test("pack sizes are read from nemlig descriptions", () => {
   assert.deepEqual(parsePackSize("400 g / hele bønner"), { amount: 400, base: "g" });

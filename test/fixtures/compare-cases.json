@@ -1,0 +1,306 @@
+{
+  "cases": [
+    {
+      "id": "exact-same-product-same-pack",
+      "family": "exact same-product/same-pack",
+      "source": {
+        "Id": "fixture-source-001",
+        "Name": "Fusilli",
+        "Brand": "Pastahuset",
+        "Description": "500 g / durumhvede",
+        "Quantity": 2,
+        "Price": 34
+      },
+      "candidates": [
+        {
+          "product_id": "fixture-candidate-001a",
+          "store_name": "Fixture Market",
+          "product_name": "Fusilli",
+          "brand": "Pastahuset",
+          "description": "500 g / durumhvede",
+          "amount": 500,
+          "unit": "g",
+          "current_price": 12,
+          "quantity": 1
+        }
+      ],
+      "expectedCurrent": {
+        "parsedPack": { "amount": 500, "base": "g" },
+        "similarities": [1],
+        "confidences": ["high"],
+        "comparables": [true],
+        "bestProductId": "fixture-candidate-001a",
+        "bestConfidence": "high",
+        "cheaper": true,
+        "saving": 10
+      }
+    },
+    {
+      "id": "unrelated-products",
+      "family": "unrelated products",
+      "source": {
+        "Id": "fixture-source-002",
+        "Name": "Formalet kaffe",
+        "Brand": "Morgenstund",
+        "Description": "400 g / mellemristet",
+        "Quantity": 1,
+        "Price": 45
+      },
+      "candidates": [
+        {
+          "product_id": "fixture-candidate-002a",
+          "store_name": "Fixture Market",
+          "product_name": "Vaskepulver",
+          "brand": "Ren Hverdag",
+          "description": "400 g / kulørt vask",
+          "amount": 400,
+          "unit": "g",
+          "current_price": 20,
+          "quantity": 1
+        }
+      ],
+      "expectedCurrent": {
+        "parsedPack": { "amount": 400, "base": "g" },
+        "similarities": [0],
+        "confidences": ["low"],
+        "comparables": [true],
+        "bestProductId": null,
+        "bestConfidence": null,
+        "cheaper": false,
+        "saving": 0
+      }
+    },
+    {
+      "id": "organic-source-organic-candidate",
+      "family": "organic source versus organic candidate",
+      "source": {
+        "Id": "fixture-source-003",
+        "Name": "Letmælk øko.",
+        "Brand": "Enggården",
+        "Description": "1 l / økologisk",
+        "Quantity": 2,
+        "Price": 28
+      },
+      "candidates": [
+        {
+          "product_id": "fixture-candidate-003a",
+          "store_name": "Fixture Market",
+          "product_name": "Letmælk økologisk",
+          "brand": "Enggården",
+          "description": "1 l / økologisk",
+          "amount": 1,
+          "unit": "l",
+          "current_price": 12,
+          "quantity": 1
+        }
+      ],
+      "expectedCurrent": {
+        "parsedPack": { "amount": 1000, "base": "ml" },
+        "similarities": [1],
+        "confidences": ["high"],
+        "comparables": [true],
+        "bestProductId": "fixture-candidate-003a",
+        "bestConfidence": "high",
+        "cheaper": true,
+        "saving": 4
+      }
+    },
+    {
+      "id": "organic-source-conventional-candidate",
+      "family": "organic source versus conventional candidate",
+      "source": {
+        "Id": "fixture-source-004",
+        "Name": "Letmælk øko.",
+        "Brand": "Enggården",
+        "Description": "1 l / økologisk",
+        "Quantity": 1,
+        "Price": 14
+      },
+      "candidates": [
+        {
+          "product_id": "fixture-candidate-004a",
+          "store_name": "Fixture Market",
+          "product_name": "Letmælk",
+          "brand": "Enggården",
+          "description": "1 l / konventionel",
+          "amount": 1,
+          "unit": "l",
+          "current_price": 10,
+          "quantity": 1
+        }
+      ],
+      "expectedCurrent": {
+        "parsedPack": { "amount": 1000, "base": "ml" },
+        "similarities": [1],
+        "confidences": ["high"],
+        "comparables": [true],
+        "bestProductId": "fixture-candidate-004a",
+        "bestConfidence": "high",
+        "cheaper": true,
+        "saving": 4
+      }
+    },
+    {
+      "id": "canned-product-gross-and-drained-weight",
+      "family": "400 g / 240 g canned product",
+      "source": {
+        "Id": "fixture-source-005",
+        "Name": "Hakkede tomater",
+        "Brand": "Solmark",
+        "Description": "400 g / 240 g drænet",
+        "Quantity": 1,
+        "Price": 18
+      },
+      "candidates": [
+        {
+          "product_id": "fixture-candidate-005a",
+          "store_name": "Fixture Market",
+          "product_name": "Hakkede tomater",
+          "brand": "Solmark",
+          "description": "240 g / drænet vægt",
+          "amount": 240,
+          "unit": "g",
+          "current_price": 8.4,
+          "quantity": 1
+        }
+      ],
+      "expectedCurrent": {
+        "parsedPack": { "amount": 400, "base": "g" },
+        "similarities": [1],
+        "confidences": ["medium"],
+        "comparables": [true],
+        "bestProductId": "fixture-candidate-005a",
+        "bestConfidence": "medium",
+        "cheaper": true,
+        "saving": 4
+      }
+    },
+    {
+      "id": "demand-950g-rival-700g",
+      "family": "950 g demand versus 700 g rival",
+      "source": {
+        "Id": "fixture-source-006",
+        "Name": "Græsk yoghurt",
+        "Brand": "Mælkeengen",
+        "Description": "950 g / 10 %",
+        "Quantity": 1,
+        "Price": 28.5
+      },
+      "candidates": [
+        {
+          "product_id": "fixture-candidate-006a",
+          "store_name": "Fixture Market",
+          "product_name": "Græsk yoghurt",
+          "brand": "Mælkeengen",
+          "description": "700 g / 10 %",
+          "amount": 700,
+          "unit": "g",
+          "current_price": 17.5,
+          "quantity": 1
+        }
+      ],
+      "expectedCurrent": {
+        "parsedPack": { "amount": 950, "base": "g" },
+        "similarities": [1],
+        "confidences": ["medium"],
+        "comparables": [true],
+        "bestProductId": "fixture-candidate-006a",
+        "bestConfidence": "medium",
+        "cheaper": true,
+        "saving": 4.75
+      }
+    },
+    {
+      "id": "same-name-two-pack-sizes",
+      "family": "same name in two pack sizes",
+      "source": {
+        "Id": "fixture-source-007",
+        "Name": "Penne",
+        "Brand": "Pastahuset",
+        "Description": "800 g / durumhvede",
+        "Quantity": 1,
+        "Price": 24
+      },
+      "candidates": [
+        {
+          "product_id": "fixture-candidate-007a",
+          "store_name": "Fixture Market",
+          "product_name": "Penne",
+          "brand": "Pastahuset",
+          "description": "400 g / durumhvede",
+          "amount": 400,
+          "unit": "g",
+          "current_price": 11.6,
+          "quantity": 1
+        },
+        {
+          "product_id": "fixture-candidate-007b",
+          "store_name": "Fixture Supermarket",
+          "product_name": "Penne",
+          "brand": "Pastahuset",
+          "description": "800 g / durumhvede",
+          "amount": 800,
+          "unit": "g",
+          "current_price": 20,
+          "quantity": 1
+        }
+      ],
+      "expectedCurrent": {
+        "parsedPack": { "amount": 800, "base": "g" },
+        "similarities": [1, 1],
+        "confidences": ["medium", "high"],
+        "comparables": [true, true],
+        "bestProductId": "fixture-candidate-007b",
+        "bestConfidence": "high",
+        "cheaper": true,
+        "saving": 4
+      }
+    },
+    {
+      "id": "high-confidence-plus-cheaper-medium",
+      "family": "high-confidence plus cheaper medium-confidence candidates",
+      "source": {
+        "Id": "fixture-source-008",
+        "Name": "Mayonnaise",
+        "Brand": "Madglæde",
+        "Description": "375 g / klassisk",
+        "Quantity": 1,
+        "Price": 18.75
+      },
+      "candidates": [
+        {
+          "product_id": "fixture-candidate-008a",
+          "store_name": "Fixture Market",
+          "product_name": "Mayonnaise",
+          "brand": "Madglæde",
+          "description": "375 g / klassisk",
+          "amount": 375,
+          "unit": "g",
+          "current_price": 15,
+          "quantity": 1
+        },
+        {
+          "product_id": "fixture-candidate-008b",
+          "store_name": "Fixture Supermarket",
+          "product_name": "Mayonnaise Light",
+          "brand": "Madglæde",
+          "description": "500 g / light",
+          "amount": 500,
+          "unit": "g",
+          "current_price": 15,
+          "quantity": 1
+        }
+      ],
+      "expectedCurrent": {
+        "parsedPack": { "amount": 375, "base": "g" },
+        "similarities": [1, 0.6666666666666666],
+        "confidences": ["high", "medium"],
+        "comparables": [true, true],
+        "bestProductId": "fixture-candidate-008b",
+        "bestConfidence": "medium",
+        "cheaper": true,
+        "saving": 7.5
+      }
+    }
+  ]
+}
