@@ -7,7 +7,7 @@ branch for the complete series is `codex/price-selection-v2`.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |---|---|---:|---:|---|---|
-| 001 | Establish grocery-decision fixtures | P1 | M | — | TODO |
+| 001 | Establish grocery-decision fixtures | P1 | M | — | DONE |
 | 002 | Calculate effective prices and whole-pack cash cost | P1 | M | 001 | TODO |
 | 003 | Enforce semantic constraints and rank by confidence | P1 | M | 002 | TODO |
 | 004 | Make history verdicts reliable and efficient | P2 | S | 001 | TODO |
