@@ -92,6 +92,11 @@ accepted.
                   "Availability": { "IsDeliveryAvailable": true, "IsAvailableInStock": true } } ] }
 ```
 
+Human output prefers positive finite `Campaign.CampaignPrice` and
+`Campaign.CampaignUnitPrice`, showing the base price alongside a different
+campaign price. A quantity campaign is not applied to one item: its
+`MinQuantity` and `TotalPrice` are shown separately until the threshold is met.
+
 `basket` — raw nemlig.com response. The fields that matter:
 
 ```json
@@ -146,15 +151,50 @@ kr overall and still have `IsMinTotalValid: false`.
                         "pack": { "amount": 500, "base": "g" } },
               "best": { "store": "Lidl", "name": "Combino Fusilli",
                         "unitPrice": 0.0119, "confidence": "high",
+                        "semanticEligible": true,
+                        "semanticMismatchReasons": [],
+                        "requiredAmount": 500, "packsNeeded": 1,
+                        "purchaseAmount": 500, "surplusAmount": 0,
+                        "purchaseCost": 5.95,
+                        "normalizedCostForRequiredAmount": 5.95,
+                        "normalizedSaving": 11.42,
                         "onSale": false, "saleValidTo": null },
-              "cheaper": true, "saving": 11.42, "alternatives": [], "error": null } ],
+              "cheaper": true, "saving": 11.42,
+              "normalizedSaving": 11.42,
+              "selectionReason": "high_confidence_preferred",
+              "winnerReason": "high_confidence_preferred",
+              "retrievalCount": 24, "requestCount": 2, "eligibleCount": 8,
+              "rejectedCounts": {
+                "missing_price": 1, "unknown_pack": 2, "different_unit": 1,
+                "low_similarity": 10, "variant_mismatch": 1,
+                "organic_mismatch": 1, "same_store": 0
+              },
+              "truncated": true, "alternatives": [], "error": null } ],
   "summary": { "lines": 15, "compared": 13, "cheaperElsewhere": 6,
-               "uncomparable": 2, "failed": 0,
-               "estimatedSavings": 79.42, "basketTotal": 653.46 } }
+               "uncomparable": 2, "unmatched": 2, "failed": 0,
+               "highConfidence": 10, "mediumConfidence": 3,
+               "truncated": 1,
+               "estimatedSavings": 79.42,
+               "confidenceTiers": {
+                 "high": { "compared": 10, "cheaperElsewhere": 4,
+                           "estimatedSavings": 61.10 },
+                 "medium": { "compared": 3, "cheaperElsewhere": 2,
+                             "estimatedSavings": 18.32 } },
+               "basketTotal": 653.46 } }
 ```
 
 `unitPrice` is per gram / millilitre / piece — multiply by 1000 for kr/kg or
-kr/l. `best` is `null` when nothing comparable was found.
+kr/l. `requiredAmount` is the basket demand in that base unit.
+`packsNeeded` is rounded up to a whole rival pack; `purchaseCost` is the cash
+outlay for those packs, and `surplusAmount` receives zero value. `saving`
+compares that whole-pack outlay with the nemlig.com line total.
+`normalizedCostForRequiredAmount` and `normalizedSaving` retain exact-volume
+analysis, but must not be presented as checkout cash. `best` is `null` when
+nothing comparable was found. `confidenceTiers` splits selected matches and
+cash savings into high and medium totals. `retrievalCount` is the number of
+unique candidates evaluated, while `requestCount` is the number of bounded
+logical passes used for that row; memoization can make the actual shared
+network request count lower.
 
 `checkout status` — `readiness` is all booleans; check them before telling a
 user the order is ready.
@@ -175,13 +215,16 @@ user the order is ready.
 
 ## Judging whether a price is good
 
-`nemlig goma history <query> --json` returns a year of daily prices plus a
-verdict. `compare --history` attaches the same verdict to each cheaper
-alternative under `rows[].best.history`, costing one extra request per match.
+`nemlig goma history <query> --json` returns a year of daily prices and, when
+the history is sufficient, a verdict. `compare --history` attaches the same
+analysis to each cheaper selected winner under `rows[].best.history`. Shared
+Goma product IDs are fetched once; matched rows that are not cheaper are not
+fetched.
 
 ```json
 { "product": { "product_id": "netto-81502000020-EA", "product_name": "Bl. 66 formalet kaffe" },
-  "summary": { "productId": "netto-81502000020-EA", "days": 365, "price": 66,
+  "summary": { "productId": "netto-81502000020-EA", "days": 365,
+               "spanDays": 364, "price": 66,
                "lowest": 39, "highest": 74.95, "average": 59.19,
                "lowestOn": "2025-11-22", "percentCheaper": 70, "percentile": 70,
                "cheaperDays": 255, "equalDays": 1, "daysOnSale": 118,
@@ -197,9 +240,12 @@ ties split. Use `percentile`, not `percentCheaper`, for any judgement: a price
 that sits at its yearly high for most of the year has few *strictly* cheaper
 days and would otherwise look like a bargain.
 
-Check `insufficientData` before reading any other field. **Being cheaper than
-nemlig.com and being a good price are different claims** — a rival shop can
-undercut nemlig.com today while sitting at its own yearly high. Report both.
+Check `insufficientData` before reading any verdict field. A verdict requires
+at least 30 distinct ISO calendar dates spanning at least 30 elapsed days.
+Insufficient results expose `days`, `spanDays`, and `insufficientData: true`
+but no good/normal/bad verdict. **Being cheaper than nemlig.com and being a good
+price are different claims** — a rival shop can undercut nemlig.com today
+while sitting at its own yearly high. Report both.
 
 ## How `compare` matches, and why the total is an estimate
 
@@ -210,12 +256,46 @@ similarity and pack size, then normalised to a price per gram/ml/piece.
 - `confidence: "medium"` — comparable per unit, but a different pack size or a
   looser name match. Printed with `?` in human output.
 - Low-confidence matches are dropped entirely.
+- If a nemlig.com source explicitly contains `øko`, `økologisk`, or `organic`,
+  the candidate name or brand must contain an organic marker too. Otherwise it
+  contributes to `rejectedCounts.organic_mismatch`. A conventional source adds
+  no organic constraint.
+- Variant conflicts such as light versus non-light products contribute to
+  `rejectedCounts.variant_mismatch` and are not eligible to win.
 
 Only `high` and `medium` count toward `estimatedSavings`. A `medium` row often
 means a 375 g jar compared against an 800 g one: the per-kilo maths is right,
-but it is a different purchase. **Report the matched product name, not just the
-number**, and never tell a user they will save X kr — tell them what the
-comparison found.
+but it is a different purchase. Cash savings require enough whole rival packs
+to cover the basket amount and assign no value to surplus. **Report the matched
+product name, not just the number**, and never tell a user they will save X kr
+— tell them what the comparison found.
+
+Ranking is lexicographic and visible in candidate fields: high confidence
+before medium, then lower whole-pack `purchaseCost`, higher matcher `score`,
+lower normalized `unitPrice`, and finally store and product name. A cheaper
+medium candidate remains in `alternatives` but cannot displace a high match.
+`selectionReason` reports whether high confidence was preferred or medium was
+used as a fallback. `winnerReason` also explains unmatched and failed rows.
+
+Candidate discovery uses at most two pages per unique query: relevance first,
+then a price-ascending page only when Goma reports more results than the first
+page returned. A brand query gets the same bounded treatment only when the
+product-name query has no high-confidence candidate. Identical query/options
+pairs share one in-flight request. Candidates are deduplicated by product ID,
+or by store/name/brand/amount/unit when the ID is absent.
+
+Rows expose aggregate primary rejection counts only:
+`missing_price`, `unknown_pack`, `different_unit`, `low_similarity`,
+`variant_mismatch`, `organic_mismatch`, and `same_store`. `truncated: true`
+means Goma reported more results than the deduplicated bounded pages contained;
+human output then says `BEST FOUND` and must not describe the result as the
+global cheapest. Human summaries split high-confidence, medium-confidence,
+unmatched, failed, and truncated line counts.
+
+`GomaApi.search` accepts an optional `labels` array and serializes it to
+`p_labels_filter`; the default is `null`. The label vocabulary is undocumented,
+so do not guess an organic label or enable one by default. Text matching above
+is authoritative until a label value is verified.
 
 ## Recipes
 

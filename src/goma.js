@@ -93,6 +93,7 @@ export class GomaApi {
 
   async search(query, {
     stores = null,
+    labels = null,
     saleOnly = false,
     sort = "relevance",
     limit = 20,
@@ -116,7 +117,7 @@ export class GomaApi {
       p_is_available_only: true,
       p_my_products_only: false,
       p_previously_bought_only: false,
-      p_labels_filter: null,
+      p_labels_filter: Array.isArray(labels) && labels.length ? [...labels] : null,
       p_order_by_clause: orderBy,
       p_limit_val: limit,
       p_offset_val: offset,

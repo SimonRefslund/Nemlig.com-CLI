@@ -602,18 +602,28 @@ export async function run(
 
     if (options.history) {
       // Being cheaper than nemlig.com does not make it a good price, so ask
-      // what each winner has actually cost over the past year.
-      const withBest = result.rows.filter((row) => row.best?.productId);
+      // what each cheaper winner has actually cost over the past year.
+      const byProductId = new Map();
+      for (const row of result.rows) {
+        if (!row.cheaper || !row.best?.productId) continue;
+        const productId = row.best.productId;
+        if (!byProductId.has(productId)) byProductId.set(productId, []);
+        byProductId.get(productId).push(row);
+      }
       let done = 0;
       const report = progressReporter(stderr, options.json, "Reading price history");
-      await mapWithLimit(withBest, 4, async (row) => {
+      await mapWithLimit([...byProductId], 4, async ([productId, rows]) => {
         try {
-          const history = await goma.priceHistory(row.best.productId, { days: 365 });
-          row.best.history = summarizePriceHistory(history, { price: row.best.price });
+          const history = await goma.priceHistory(productId, { days: 365 });
+          for (const row of rows) {
+            row.best.history = summarizePriceHistory(history, { price: row.best.price });
+          }
         } catch (error) {
-          row.best.history = { insufficientData: true, error: error.message };
+          for (const row of rows) {
+            row.best.history = { insufficientData: true, error: error.message };
+          }
         }
-        report?.(++done, withBest.length);
+        report?.(++done, byProductId.size);
       });
       clearProgress(stderr, options.json);
     }

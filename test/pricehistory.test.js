@@ -1,14 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { summarizePriceHistory } from "../src/pricehistory.js";
+import {
+  MIN_HISTORY_DISTINCT_DATES,
+  MIN_HISTORY_SPAN_DAYS,
+  summarizePriceHistory,
+} from "../src/pricehistory.js";
 
-function history(prices, { productId = "netto-1-EA", onSale = () => false } = {}) {
+function history(prices, {
+  productId = "netto-1-EA",
+  onSale = () => false,
+  dayOffset = (index) => index,
+} = {}) {
   return {
     productId,
     currentPrice: prices.at(-1),
     points: prices.map((price, index) => ({
-      date: new Date(Date.UTC(2025, 6, 14 + index)).toISOString().slice(0, 10),
+      date: new Date(Date.UTC(2025, 6, 14 + dayOffset(index))).toISOString().slice(0, 10),
       price,
       normalPrice: price,
       onSale: onSale(price),
@@ -61,19 +69,21 @@ test("a price at the year's high is never reported as a good one", () => {
 
 test("the judged price can be someone else's, not just the current one", () => {
   // compare uses this to ask whether a rival shop's price is actually good.
-  const past = history([50, 50, 50, 50]);
+  const past = history(Array(31).fill(50));
   assert.equal(summarizePriceHistory(past, { price: 30 }).verdict, "lowest");
   assert.equal(summarizePriceHistory(past, { price: 80 }).verdict, "bad");
 });
 
 test("the last strictly cheaper day is reported, not merely the last equal one", () => {
-  const summary = summarizePriceHistory(history([20, 12, 20, 20, 20]));
+  const summary = summarizePriceHistory(history([20, 12, ...Array(29).fill(20)]));
   assert.equal(summary.lastCheaper, "2025-07-15");
   assert.equal(summary.lastCheaperPrice, 12);
 });
 
 test("min, max, average, and the date of the low are reported", () => {
-  const summary = summarizePriceHistory(history([10, 30, 20]), {});
+  const summary = summarizePriceHistory(
+    history([...Array(10).fill([10, 30, 20]).flat(), 20]),
+  );
   assert.equal(summary.lowest, 10);
   assert.equal(summary.highest, 30);
   assert.equal(summary.average, 20);
@@ -83,13 +93,55 @@ test("min, max, average, and the date of the low are reported", () => {
 
 test("days on offer are counted", () => {
   const summary = summarizePriceHistory(
-    history([20, 12, 20], { onSale: (price) => price < 20 }),
+    history([20, 12, ...Array(29).fill(20)], { onSale: (price) => price < 20 }),
   );
   assert.equal(summary.daysOnSale, 1);
 });
 
+test("five and twenty-nine distinct dates are insufficient for a verdict", () => {
+  assert.equal(MIN_HISTORY_DISTINCT_DATES, 30);
+  assert.equal(MIN_HISTORY_SPAN_DAYS, 30);
+  for (const count of [5, 29]) {
+    const summary = summarizePriceHistory(history(Array(count).fill(20)));
+    assert.equal(summary.days, count);
+    assert.equal(summary.spanDays, count - 1);
+    assert.equal(summary.insufficientData, true);
+    assert.equal(summary.verdict, undefined);
+    assert.equal(summary.verdictLabel, undefined);
+  }
+});
+
+test("thirty distinct dates spanning thirty days produce a verdict", () => {
+  const summary = summarizePriceHistory(history(Array(30).fill(20), {
+    dayOffset: (index) => index === 29 ? 30 : index,
+  }));
+  assert.equal(summary.days, 30);
+  assert.equal(summary.spanDays, 30);
+  assert.equal(summary.insufficientData, false);
+  assert.equal(summary.verdict, "normal");
+});
+
+test("duplicate observations on one date do not satisfy the threshold", () => {
+  const past = history(Array(30).fill(20), { dayOffset: () => 0 });
+  const summary = summarizePriceHistory(past);
+  assert.equal(summary.days, 1);
+  assert.equal(summary.spanDays, 0);
+  assert.equal(summary.insufficientData, true);
+  assert.equal(summary.verdict, undefined);
+});
+
+test("descending input still reports the most recent cheaper calendar date", () => {
+  const past = history([20, 12, ...Array(29).fill(20)]);
+  past.points.reverse();
+  const summary = summarizePriceHistory(past);
+  assert.equal(summary.lastCheaper, "2025-07-15");
+  assert.equal(summary.lastCheaperPrice, 12);
+});
+
 test("an empty history says so instead of inventing a verdict", () => {
   const summary = summarizePriceHistory({ productId: "x", points: [], currentPrice: null });
+  assert.equal(summary.days, 0);
+  assert.equal(summary.spanDays, 0);
   assert.equal(summary.insufficientData, true);
   assert.equal(summary.verdict, undefined);
 });
