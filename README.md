@@ -1,116 +1,82 @@
 # nemlig CLI
 
-An unofficial command-line client for [nemlig.com](https://www.nemlig.com/).
-It supports public catalog search plus signed-in account, basket, order history,
-delivery-slot, and checkout-preparation flows, and cross-chain price comparison
-via [goma.gg](https://goma.gg/).
+An unofficial command-line client for [nemlig.com](https://www.nemlig.com/)
+with price comparison through [goma.gg](https://goma.gg/).
 
-## Let an AI agent do the shopping
+Use it to:
 
-Every command speaks `--json`, everything that mutates requires `--yes`, and
-**no command can complete a purchase**. That combination makes this safe to
-hand to an agent — Claude Code, a cron agent, whatever you run — without giving
-it the ability to spend your money.
+- search the nemlig.com catalogue;
+- manage a signed-in basket;
+- learn from previous orders and refill regular purchases;
+- find and reserve delivery slots;
+- compare basket prices across Danish grocery chains.
 
-Give it a task like *"see what we bought last time, refill the basket, tell me
-what's cheaper at the other chains, and reserve a free delivery slot this
-weekend"*, and it can do the whole thing:
-
-```sh
-nemlig habits --json                        # what do we buy regularly, how often?
-nemlig reorder --yes                        # basket what is running out
-nemlig compare --json                       # where is it cheaper?
-nemlig delivery slots --days 7 --json       # find a 0 kr. slot
-nemlig delivery select <timeslot-id> --yes
-nemlig checkout status                      # anything missing?
-```
-
-[AGENTS.md](AGENTS.md) is the precise reference for agents: exact JSON
-shapes, exit codes to branch on, safety rules, and working recipes.
-
-The last step is the one it cannot take. `checkout open` hands the basket to
-your browser, and payment, terms, and MobilePay stay with you — after you have
-seen the total. The worst an agent can do is fill your basket.
-
-The API calls were mapped from Firefox's Network Monitor. Cookies, bearer
-tokens, anti-forgery values, personal details, and basket contents were excluded
-from the saved capture.
+The CLI can prepare a basket, but it cannot place an order. Checkout and
+payment always happen in your browser.
 
 ## Requirements
 
 - Node.js 20 or newer
-- A web browser for the final checkout/payment step
+- A browser for checkout
 
 ## Install
 
 ```sh
 git clone https://github.com/tobiasdosdal/Nemlig.com-CLI.git
 cd Nemlig.com-CLI
-npm link          # puts "nemlig" on your PATH
+npm link
 nemlig --help
 ```
 
-There are no dependencies to install. If you would rather not link it
-globally, run it in place:
+There are no runtime dependencies. You can also run the CLI without linking
+it:
 
 ```sh
 node src/cli.js search "økologisk mælk" --limit 5
 ```
 
-## Public catalog
+## Quick start
 
-```sh
-nemlig search kaffe
-nemlig search kaffe --limit 5 --offset 20
-nemlig suggest kaff
-nemlig product 5035178
-nemlig product kaffe-oeko-5035178
-nemlig product https://www.nemlig.com/kaffe-oeko-5035178
-nemlig search kaffe --json | jq '.products[] | {Id, Name, Price}'
-```
-
-Product IDs used by basket commands are shown by `search` and `product`.
-Only the full slug is addressable on nemlig.com, so `product <id>` resolves the
-slug through search first — one extra request.
-
-Human-readable search and product output uses the active campaign price when
-nemlig.com supplies one, with the base price shown alongside it. Multi-buy
-campaigns remain at the single-item base price and show their quantity
-threshold and total separately.
-
-Options accept `--limit 5` and `--limit=5`. Use `--` to end option parsing when
-a search term starts with a dash.
-
-## Account
+Sign in:
 
 ```sh
 nemlig account login you@example.com
 nemlig account status
-nemlig account logout
 ```
 
-Login prompts for the password without echo. The password is sent only to
-`https://www.nemlig.com/webapi/login` and is never written to disk. Session
-cookies are saved to:
+Search and build a basket:
 
-| Platform | Location |
-| --- | --- |
-| macOS/Linux | `~/.config/nemlig-cli/session.json` (or `$XDG_CONFIG_HOME`) |
-| Windows | `%APPDATA%\nemlig-cli\session.json` |
+```sh
+nemlig search kaffe --limit 5
+nemlig product 5035178
+nemlig basket add 5035178 2 --yes
+nemlig basket
+```
 
-The directory is private and the session file is forced to mode `0600` on Unix.
-Writes go through a temporary file and a rename, so an interrupted run cannot
-leave a half-written session. Set `NEMLIG_CONFIG_DIR` to choose another
-directory.
+Compare the basket and check whether rival prices are historically good:
 
-The CLI cannot import a browser session, and browser-cookie export is
-intentionally avoided. `checkout open` simply hands the basket URL to your
-default browser, which is where you are already signed in.
+```sh
+nemlig compare
+nemlig compare --history
+nemlig compare --store Netto --store Lidl --json
+```
 
-## Basket
+Reserve a delivery slot and hand off to the browser:
 
-Basket writes require `--yes` so scripts do not mutate it accidentally.
-Quantities are absolute for `set` and incremental for `add`.
+```sh
+nemlig delivery slots --days 7
+nemlig delivery select <timeslot-id> --yes
+nemlig checkout status
+nemlig checkout open
+```
+
+`checkout open` is the final CLI step. It does not confirm or pay for the
+order.
+
+## Basket commands
+
+Basket changes require `--yes`. `add` is incremental, while `set` replaces the
+quantity with an absolute value.
 
 ```sh
 nemlig basket
@@ -120,173 +86,46 @@ nemlig basket remove 5035178 --yes
 nemlig basket clear --yes
 ```
 
-Basket commands also accept the slug form (`kaffe-oeko-5035178`), so output
-from `search` can be piped straight back in.
+Product IDs and slugs from `search` are both accepted. `basket clear` also
+removes any reserved delivery slot and cannot be undone.
 
-`basket` shows the product count, per-line discounts, the bag/deposit/delivery
-breakdown, and the reserved delivery time. nemlig.com applies its minimum-order
-rule to the products subtotal rather than the grand total, so the warning is
-computed against `TotalProductsPrice`.
+## Repeat regular purchases
 
-Every command also accepts `--json` where it is useful.
-
-## Orders and delivery
+`habits` estimates purchase cadence from previous orders. `reorder` shows a
+proposal unless `--yes` is supplied.
 
 ```sh
-nemlig orders
-nemlig orders --limit 20
-nemlig orders show <order-number>
-
-nemlig delivery slots --days 7
-nemlig delivery slots --all
-nemlig delivery slots --start 2026-07-27 --json
-nemlig delivery select <timeslot-id> --yes
-```
-
-`delivery slots` lists bookable slots grouped by day and hides sold-out ones;
-`--all` includes them. A slot the account has already reserved is always shown
-and marked `reserved`, even though nemlig.com reports it as unbookable. Slots
-marked `unattended` are the longer no-recipient-needed windows (`Type: 1` in the
-response) — that mapping is inferred from the capture, not documented.
-
-Selecting a slot reserves it through the site's
-`TryUpdateDeliveryTime` flow. Availability can change between listing and
-selection.
-
-## Checkout
-
-```sh
-nemlig checkout status
-nemlig checkout status --json
-nemlig checkout open
-```
-
-`checkout status` checks basket totals, address, timeslot, validation failures,
-current terms, and age restrictions, and explains each failed check. `checkout
-open` launches the site's basket page in your default browser.
-
-The CLI deliberately does **not** expose `PlaceOrderLoggedIn`. Payment,
-acceptance of the current terms, 3-D Secure/MobilePay, and the final order
-confirmation remain in your browser, where the total and delivery details are
-visible.
-
-## Learning from past orders
-
-`habits` reads your recent orders and works out what you buy regularly and how
-often. Cadence is measured in **days between purchases** rather than "every Nth
-order", because shopping trips are irregular — counting orders would make a
-weekly staple and a quarterly one look identical whenever they land in the same
-basket.
-
-```sh
-nemlig habits
 nemlig habits --orders 20 --min-orders 3
-nemlig reorder                            # proposal only; the basket is untouched
-nemlig reorder --yes                      # apply it
-nemlig reorder --from 1063490166 --yes    # repeat one specific order
+nemlig reorder
+nemlig reorder --yes
+nemlig orders --limit 5
+nemlig reorder --from <order-number> --yes
 ```
 
-```text
-PRODUCT                          ORDERS   EVERY    LAST BOUGHT   DUE
-Sødmælk 25% jersey øko.          6/7      35 d     36 d ago      1 d ago
-Gulerødder øko.                  4/7      45 d     71 d ago      26 d ago
-Falke hvedemel øko.              5/7      47 d     36 d ago      in 11 d
-```
+Cadence is based on the median number of days between purchases. Products that
+appear to have been dropped are marked as lapsed and excluded from `reorder`.
+Items already in the basket are not added again.
 
-Two limits are worth knowing:
+## Price comparison
 
-- The interval is the **median** gap between purchases, so it shrugs off one
-  holiday-sized outlier — but two purchases is a guess, not a cadence. Raise
-  `--min-orders` for a stricter view.
-- A product bought a few times and then dropped would otherwise read as months
-  overdue. Past twice its own interval it is treated as **lapsed** and kept out
-  of `reorder`; `habits` lists those separately.
+`compare` searches goma.gg for alternatives to every basket line. The two
+catalogues do not share product IDs, so results are estimates based on product
+names, variants, and pack sizes.
 
-`reorder` skips anything already in the basket, so running it twice adds
-nothing the second time.
+The important rules are:
 
-## Price comparison (goma.gg)
+- Explicitly organic basket items only match explicitly organic alternatives.
+- High-confidence matches are preferred over medium-confidence matches.
+- A `?` marks a medium-confidence result.
+- Savings use the cost of the whole rival packs you would need to buy.
+- Campaign prices are used when their quantity requirements are met.
+- `BEST FOUND` means the bounded search did not inspect every possible result.
 
-goma.gg tracks grocery offers across 16 Danish chains, nemlig.com included.
+Different pack sizes can still be compared per kilogram, litre, or piece, but
+surplus product is not counted as a saving. Treat the total as a guide, not a
+quote, and check the matched product name before acting on it.
 
-```sh
-nemlig goma stores
-nemlig goma search kaffe --sale --sort discount
-nemlig goma search "hakkede tomater" --store Netto --store Lidl
-nemlig compare
-nemlig compare --store "REMA 1000" --json
-```
-
-`compare` looks up every basket line and reports the best comparable
-alternative it finds outside nemlig.com. Because the two catalogues share no
-product IDs, lines are matched on name similarity and pack size:
-
-- Candidate retrieval is bounded: each unique query gets one relevance page
-  and, only when more results exist, one price-ascending page at the same
-  limit. If the product-name query finds no high-confidence match, one bounded
-  brand query is added. Identical searches share the same in-flight request.
-- Candidates are deduplicated by Goma product ID. Products without an ID use
-  store, name, brand, amount, and unit instead, so genuinely different pack
-  sizes remain available.
-- Prices are normalised to a base unit (g, ml, or piece), so a 375 g jar can be
-  compared against a 800 g one.
-- Matches are rated `high`, `medium`, or `low`; only `high` and `medium` count
-  toward the savings estimate, and `medium` rows are printed with a `?`.
-- An explicitly organic basket line only accepts a rival whose name or brand
-  also explicitly says `øko`, `økologisk`, or `organic`. Organic requirements
-  are checked separately from fuzzy name similarity.
-- A high-confidence candidate always wins over medium-confidence candidates.
-  Within a tier, whole-pack cash cost is lowest first, then matcher score,
-  normalized unit price, store, and product name provide deterministic
-  tie-breakers.
-- Cash savings compare the current nemlig.com line total with enough whole
-  rival packs to cover that amount. Any surplus is valued at zero rather than
-  treated as future savings.
-- JSON output also retains the normalized cost and saving for the exact
-  required amount, so per-kilo analysis remains available without being
-  mistaken for checkout cash.
-- A line whose pack size cannot be parsed is reported as unmatched rather than
-  silently skipped.
-- JSON rows include aggregate rejection counts, retrieval and eligibility
-  counts, the winner reason, and whether retrieval was truncated. Rejection
-  counts use stable reasons rather than exposing every rejected product.
-
-```text
-PRODUCT                           NEMLIG           BEST             STORE         SAVE
-────────────────────────────────  ───────────────  ───────────────  ────────────  ──────────
-Bønner grønne øko.                66,67 kr./kg     31,00 kr./kg     Bilka         21,40 kr.
-Fusilli                           34,74 kr./kg     11,90 kr./kg     Lidl          11,42 kr.
-
-Matches:
-? Bønner grønne øko. (300 g) → Bilka: Grønne bønner øko (450 g)
-  Fusilli (500 g) → Lidl: Combino Fusilli (500 g)
-
-Basket total:      653,46 kr.
-Estimated saving:  79,42 kr.
-
-10 high confidence · 3 medium confidence · 2 unmatched
-```
-
-The `?` marks a medium-confidence match: the products are comparable per unit,
-but the pack is a different size or the name match is looser. The displayed
-saving accounts for whole packs; surplus product has no assigned value. Treat
-the total as a guide, not a quote. When the bounded search cannot retrieve all
-reported candidates, human output says `BEST FOUND` and explicitly avoids a
-global-cheapest claim. `--sort` accepts `relevance`, `price-asc`, `price-desc`,
-`discount`, `name-asc`, and `name-desc`.
-
-The Goma client accepts an explicit `labels` filter for callers that know a
-verified goma.gg label value, but comparison does not guess or enable an
-undocumented organic label. Text-based organic enforcement is authoritative.
-
-The client uses the publishable, RLS-protected key that goma.gg's own web app
-ships with, and opts out of their search analytics. goma.gg also offers a
-sanctioned partner Data API (goma@goma.gg) if you need a contractual footing.
-
-## Is it actually a good price?
-
-Cheaper than nemlig.com does not mean cheap. goma.gg keeps a year of daily
-prices, so a price can be judged against what the product normally costs.
+Use `--history` to judge each cheaper winner against its recent price history:
 
 ```sh
 nemlig goma history kaffe --store Netto
@@ -294,86 +133,70 @@ nemlig goma history "hakkede tomater" --store Netto --days 180 --json
 nemlig compare --history
 ```
 
-```text
-Bl. 66 formalet kaffe — Netto
+Being cheaper than nemlig.com and being a good price are separate claims. A
+history verdict needs at least 30 dated observations spanning at least 30
+days; thinner histories are reported without a verdict.
 
-Price now:      66,00 kr.
-Year low:       39,00 kr. on Sat, 22 Nov 2025
-Year high:      74,95 kr.
-Average:        59,19 kr.
-Cheaper on:     255 of 365 days (70%)
-On offer:       118 of 365 days
-Last cheaper:   45,00 kr. on Sat, 25 Jul 2026
+For exact JSON fields, confidence diagnostics, and matching rules, see
+[AGENTS.md](AGENTS.md).
 
-▅▃▅▆▆▃▆▃▅▆▂▄▄▅▆▂▃▆▄▃▅▆▂▄█▅▁▁▇▁▄██▄▇▇▄██▄▇███▅▃
-Mon, 14 Jul 2025 → Sun, 26 Jul 2026
+## Automation and agents
 
-Verdict: this price is above its usual price.
-```
+Useful commands support `--json`, and every mutation requires `--yes`. The CLI
+also uses stable exit codes:
 
-`compare --history` runs the same judgement on every cheaper alternative it
-found, which is where it earns its keep — a rival shop can be cheaper than
-nemlig.com today and still be at its own yearly high:
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `2` | Not signed in or session expired |
+| `3` | nemlig.com or goma.gg failed |
+| `64` | Invalid command or option |
 
-```text
-? Kartoffelrøsti (200 g) → Wolt Market: Kartoffelrøsti, Gestus (500 g)
-    over the past year: near its highest (low 23,50 kr., cheaper on 77% of days)
-? Remoulade (375 g) → Bilka: Grov remoulade (800 g)
-    over the past year: at its lowest this year (low 20,00 kr., cheaper on 0% of days)
-```
+[AGENTS.md](AGENTS.md) contains the complete machine-facing reference,
+including JSON shapes, retry rules, mutation safety, and agent workflows.
 
-The verdict ranks today against every day of the year, splitting ties. That
-detail matters: a shelf price that holds steady at its high for most of the
-year has few strictly-cheaper days, and ranking on those alone would score a
-year-high price as a bargain.
+No command exposes nemlig.com's final order endpoint. An automated process can
+fill a basket and reserve a slot, but it cannot spend money.
 
-A verdict requires at least 30 distinct dated observations spanning at least
-30 calendar days. Thinner histories report `insufficientData`, `days`, and
-`spanDays` without calling the price good, normal, or bad. History points are
-sorted by their ISO calendar date before the low and last-cheaper dates are
-derived.
+## Account data
 
-For `compare --history`, only cheaper selected winners are checked. If several
-basket lines select the same goma.gg product, its history is fetched once and
-the result is attached to every applicable row.
+The password is sent only to nemlig.com's login endpoint and is never saved.
+Session cookies are stored locally:
+
+| Platform | Location |
+| --- | --- |
+| macOS/Linux | `~/.config/nemlig-cli/session.json` |
+| Windows | `%APPDATA%\nemlig-cli\session.json` |
+
+Set `NEMLIG_CONFIG_DIR` to choose another directory. On Unix, the session file
+uses mode `0600` and is written atomically.
 
 ## Environment
 
 | Variable | Effect |
 | --- | --- |
-| `NEMLIG_CONFIG_DIR` | Directory holding `session.json` |
-| `NEMLIG_TIMEOUT_MS` | Per-request timeout, default `20000` |
-| `NEMLIG_RETRIES` | Retries on 429/5xx for reads, default `2` |
-| `NEMLIG_DEBUG` | Print stack traces on failure |
-| `GOMA_API_KEY` | Override the public goma.gg key if it rotates |
+| `NEMLIG_CONFIG_DIR` | Session directory |
+| `NEMLIG_TIMEOUT_MS` | Request timeout; default `20000` |
+| `NEMLIG_RETRIES` | Read retries for 429/5xx; default `2` |
+| `NEMLIG_DEBUG` | Print stack traces |
+| `GOMA_API_KEY` | Override the goma.gg API key |
 | `GOMA_API_ORIGIN` | Override the goma.gg API origin |
 
-Basket writes are never retried, so a retry cannot double a line.
+Basket writes are never retried.
 
-## Exit codes
-
-| Code | Meaning |
-| --- | --- |
-| `0` | Success |
-| `2` | Not signed in, or the session expired |
-| `3` | nemlig.com or goma.gg failed, timed out, or was unreachable |
-| `64` | Bad usage: unknown command, option, or argument |
-
-## Verify
+## Development
 
 ```sh
 npm test
 npm run check
 ```
 
-The suite is hermetic — every network call is stubbed, so tests never reach
-nemlig.com or goma.gg. CI runs them on Node 20, 22, and 24 across Linux, macOS,
-and Windows.
+Tests are hermetic and do not contact nemlig.com or goma.gg. CI runs on Node
+20, 22, and 24 across Linux, macOS, and Windows.
 
-## Caveats
+The sanitized request inventories are in
+[`docs/network-capture.json`](docs/network-capture.json) and
+[`docs/goma-api.json`](docs/goma-api.json). These web-app endpoints are not
+published as stable APIs and can change without notice.
 
-The sanitized request inventory is in
-[`docs/network-capture.json`](docs/network-capture.json), and the goma.gg one in
-[`docs/goma-api.json`](docs/goma-api.json). Neither site publishes these web-app
-endpoints as a stable public API, so they can change without notice. This
-project is not affiliated with nemlig.com or goma.gg.
+This project is not affiliated with nemlig.com or goma.gg.
