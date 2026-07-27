@@ -33,7 +33,7 @@ const UNIT_SCALE = {
 
 const STOP_WORDS = new Set([
   "øko", "øko.", "økologisk", "og", "med", "m", "uden", "u", "ca", "stk", "fra",
-  "the", "of", "de", "la", "i",
+  "the", "of", "de", "la", "i", "organic",
 ]);
 
 export function normalizeText(value) {
@@ -56,9 +56,21 @@ const VARIANT_MARKERS = new Set([
   "røget", "salt", "usaltet", "hel", "hakket", "revet",
 ]);
 
+const ORGANIC_MARKERS = new Set(["øko", "økologisk", "organic"]);
+
+export function extractSemanticAttributes(...values) {
+  const tokens = normalizeText(values.filter(Boolean).join(" "))
+    .split(" ")
+    .filter(Boolean);
+  return {
+    organic: tokens.some((token) => ORGANIC_MARKERS.has(token)),
+    variants: [...new Set(tokens.filter((token) => VARIANT_MARKERS.has(token)))].sort(),
+  };
+}
+
 export function variantMismatch(a, b) {
-  const left = new Set(tokenize(a).filter((token) => VARIANT_MARKERS.has(token)));
-  const right = new Set(tokenize(b).filter((token) => VARIANT_MARKERS.has(token)));
+  const left = new Set(extractSemanticAttributes(a).variants);
+  const right = new Set(extractSemanticAttributes(b).variants);
   for (const token of left) if (!right.has(token)) return true;
   for (const token of right) if (!left.has(token)) return true;
   return false;
@@ -214,6 +226,7 @@ export function describeBasketLine(line) {
     : Number(line?.ItemPrice);
   const packResolution = resolvePack(line, perItem);
   const { pack } = packResolution;
+  const semantics = extractSemanticAttributes(line?.Name, line?.Brand, line?.Description);
   return {
     id: String(line?.Id ?? ""),
     name: line?.Name ?? "Product",
@@ -223,6 +236,7 @@ export function describeBasketLine(line) {
     perItem: Number.isFinite(perItem) ? perItem : null,
     pack,
     unitPrice: pack && Number.isFinite(perItem) ? perItem / pack.amount : null,
+    semantics,
     ...packResolution,
   };
 }
@@ -230,12 +244,14 @@ export function describeBasketLine(line) {
 function describeCandidate(product) {
   const price = Number(product?.current_price);
   const pack = toBaseAmount(product?.amount, product?.unit);
+  const name = product?.product_name ?? "?";
+  const brand = product?.brand ?? "";
   return {
     // Kept so price history can be looked up for whichever candidate wins.
     productId: product?.product_id ?? null,
     store: product?.store_name ?? "?",
-    name: product?.product_name ?? "?",
-    brand: product?.brand ?? "",
+    name,
+    brand,
     price: Number.isFinite(price) ? price : null,
     pack,
     unitPrice: pack && Number.isFinite(price) && price > 0 ? price / pack.amount : null,
@@ -243,11 +259,24 @@ function describeCandidate(product) {
     saleValidTo: product?.sale_valid_to ?? null,
     discountPercentage: Number(product?.discount_percentage) || 0,
     url: product?.product_url ?? null,
+    semantics: extractSemanticAttributes(name, brand),
   };
 }
 
 /** Rates how confidently a goma.gg product stands in for a basket line. */
 export function scoreCandidate(line, candidate) {
+  const sourceSemantics = line.semantics ??
+    extractSemanticAttributes(line.name, line.brand, line.description);
+  const candidateSemantics = candidate.semantics ??
+    extractSemanticAttributes(candidate.name, candidate.brand, candidate.description);
+  const organicRequirementMet = !sourceSemantics.organic || candidateSemantics.organic;
+  const variantsMatch =
+    sourceSemantics.variants.length === candidateSemantics.variants.length &&
+    sourceSemantics.variants.every((variant, index) =>
+      variant === candidateSemantics.variants[index]
+    );
+  const semanticMismatchReasons = organicRequirementMet ? [] : ["organic_mismatch"];
+
   const nameScore = Math.max(
     similarity(line.name, candidate.name),
     similarity(`${line.brand} ${line.name}`, `${candidate.brand} ${candidate.name}`),
@@ -266,13 +295,28 @@ export function scoreCandidate(line, candidate) {
   // ("Mayonnaise") must not reach high confidence just because some unrelated
   // brand happens to ship the same pack size. `score` only ranks candidates.
   const named = nameScore >= 0.6 || (brandMatch && nameScore >= 0.5);
-  const variant = variantMismatch(line.name, candidate.name);
+  const variant = !variantsMatch;
 
   let confidence = "low";
   if (named && sameBase && sizeClose && !variant) confidence = "high";
   else if (nameScore >= 0.4 && sameBase) confidence = "medium";
 
-  return { score, confidence, sameBase, sizeClose, comparable: sameBase };
+  return {
+    score,
+    confidence,
+    sameBase,
+    sizeClose,
+    comparable: sameBase,
+    semanticEligible: semanticMismatchReasons.length === 0,
+    semanticMismatchReasons,
+    rejectionReason: semanticMismatchReasons[0] ?? null,
+    sourceSemantics,
+    candidateSemantics,
+    semanticMatch: {
+      organic: organicRequirementMet,
+      variants: variantsMatch,
+    },
+  };
 }
 
 const COUNTED = new Set(["high", "medium"]);
@@ -298,6 +342,28 @@ function addPurchaseEconomics(line, candidate) {
   };
 }
 
+const CONFIDENCE_RANK = { high: 0, medium: 1 };
+
+function compareRankText(left, right) {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function compareCandidateRank(left, right) {
+  return (CONFIDENCE_RANK[left.confidence] ?? 2) -
+      (CONFIDENCE_RANK[right.confidence] ?? 2) ||
+    left.purchaseCost - right.purchaseCost ||
+    right.score - left.score ||
+    left.unitPrice - right.unitPrice ||
+    compareRankText(left.store, right.store) ||
+    compareRankText(left.name, right.name);
+}
+
+function candidateKey(candidate) {
+  return candidate.productId ??
+    `${candidate.store}|${candidate.name}|${candidate.pack?.base}|${candidate.pack?.amount}`;
+}
+
 /**
  * Looks each basket line up on goma.gg and reports the cheapest comparable
  * alternative outside nemlig.com.
@@ -311,36 +377,57 @@ export async function compareBasket(basket, goma, {
   const lines = (basket?.Lines ?? []).map(describeBasketLine);
   const targetStores = stores?.length ? stores.filter((store) => store !== NEMLIG_STORE) : null;
 
-  const rate = (line, products) =>
-    products
+  const rate = (line, products) => {
+    const scored = products
       .map(describeCandidate)
       .filter((candidate) => candidate.store !== NEMLIG_STORE && candidate.unitPrice != null)
-      .map((candidate) => ({ ...candidate, ...scoreCandidate(line, candidate) }))
-      .filter((candidate) => candidate.comparable && candidate.confidence !== "low")
-      .map((candidate) => addPurchaseEconomics(line, candidate));
+      .map((candidate) => ({ ...candidate, ...scoreCandidate(line, candidate) }));
+    return {
+      eligible: scored
+        .filter((candidate) =>
+          candidate.semanticEligible &&
+          candidate.comparable &&
+          candidate.confidence !== "low"
+        )
+        .map((candidate) => addPurchaseEconomics(line, candidate)),
+      rejected: scored.filter((candidate) => !candidate.semanticEligible),
+    };
+  };
 
   let done = 0;
   const results = await mapWithLimit(lines, concurrency, async (line) => {
     const options = { stores: targetStores, limit: candidatesPerLine };
     let rated = [];
+    let rejected = [];
     let error = null;
 
     try {
       // The product name alone gives the best recall: prefixing the brand
       // narrows goma.gg's similarity search hard (often to a single hit).
       const byName = await goma.search(line.name, options);
-      rated = rate(line, byName.products);
+      const byNameRated = rate(line, byName.products);
+      rated = byNameRated.eligible;
+      rejected = byNameRated.rejected;
 
       // Fall back to brand + name when the name alone found nothing solid;
       // for own-brand staples the brand is what disambiguates.
       if (line.brand && !rated.some((candidate) => candidate.confidence === "high")) {
         const byBrand = await goma.search(`${line.brand} ${line.name}`.trim(), options);
-        const seen = new Set(rated.map((candidate) => `${candidate.store}|${candidate.name}`));
-        for (const candidate of rate(line, byBrand.products)) {
-          const key = `${candidate.store}|${candidate.name}`;
+        const byBrandRated = rate(line, byBrand.products);
+        const seen = new Set(rated.map(candidateKey));
+        for (const candidate of byBrandRated.eligible) {
+          const key = candidateKey(candidate);
           if (!seen.has(key)) {
             seen.add(key);
             rated.push(candidate);
+          }
+        }
+        const rejectedSeen = new Set(rejected.map(candidateKey));
+        for (const candidate of byBrandRated.rejected) {
+          const key = candidateKey(candidate);
+          if (!rejectedSeen.has(key)) {
+            rejectedSeen.add(key);
+            rejected.push(candidate);
           }
         }
       }
@@ -349,7 +436,11 @@ export async function compareBasket(basket, goma, {
     }
     onProgress?.(++done, lines.length);
 
-    rated.sort((a, b) => a.purchaseCost - b.purchaseCost || a.unitPrice - b.unitPrice);
+    rated.sort(compareCandidateRank);
+    rated = rated.map((candidate, index) => ({
+      ...candidate,
+      selectionRank: index + 1,
+    }));
 
     const best = rated[0] ?? null;
     const nemligCashCost = line.perItem * line.quantity;
@@ -365,15 +456,29 @@ export async function compareBasket(basket, goma, {
       line,
       best,
       alternatives: rated.slice(0, 3),
+      rejected,
       cheaper,
       saving,
       normalizedSaving,
+      selectionReason: best?.confidence === "high"
+        ? "high_confidence_preferred"
+        : best
+        ? "medium_confidence_fallback"
+        : null,
       error,
     };
   });
 
   const compared = results.filter((row) => row.best && COUNTED.has(row.best.confidence));
   const savings = compared.reduce((sum, row) => sum + row.saving, 0);
+  const confidenceTiers = Object.fromEntries(["high", "medium"].map((confidence) => {
+    const tier = compared.filter((row) => row.best.confidence === confidence);
+    return [confidence, {
+      compared: tier.length,
+      cheaperElsewhere: tier.filter((row) => row.cheaper).length,
+      estimatedSavings: tier.reduce((sum, row) => sum + row.saving, 0),
+    }];
+  }));
 
   return {
     rows: results,
@@ -384,6 +489,7 @@ export async function compareBasket(basket, goma, {
       uncomparable: results.filter((row) => !row.best).length,
       failed: results.filter((row) => row.error).length,
       estimatedSavings: savings,
+      confidenceTiers,
       basketTotal: Number(basket?.TotalPrice) || null,
       stores: targetStores,
     },

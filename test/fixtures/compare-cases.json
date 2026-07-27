@@ -29,6 +29,7 @@
         "similarities": [1],
         "confidences": ["high"],
         "comparables": [true],
+        "semanticEligible": [true],
         "bestProductId": "fixture-candidate-001a",
         "bestConfidence": "high",
         "cheaper": true,
@@ -64,6 +65,7 @@
         "similarities": [0],
         "confidences": ["low"],
         "comparables": [true],
+        "semanticEligible": [true],
         "bestProductId": null,
         "bestConfidence": null,
         "cheaper": false,
@@ -99,6 +101,7 @@
         "similarities": [1],
         "confidences": ["high"],
         "comparables": [true],
+        "semanticEligible": [true],
         "bestProductId": "fixture-candidate-003a",
         "bestConfidence": "high",
         "cheaper": true,
@@ -134,10 +137,12 @@
         "similarities": [1],
         "confidences": ["high"],
         "comparables": [true],
-        "bestProductId": "fixture-candidate-004a",
-        "bestConfidence": "high",
-        "cheaper": true,
-        "saving": 4
+        "semanticEligible": [false],
+        "rejectionReasons": ["organic_mismatch"],
+        "bestProductId": null,
+        "bestConfidence": null,
+        "cheaper": false,
+        "saving": 0
       }
     },
     {
@@ -171,6 +176,7 @@
         "similarities": [1],
         "confidences": ["high"],
         "comparables": [true],
+        "semanticEligible": [true],
         "bestProductId": "fixture-candidate-005a",
         "bestConfidence": "high",
         "cheaper": true,
@@ -206,6 +212,7 @@
         "similarities": [1],
         "confidences": ["medium"],
         "comparables": [true],
+        "semanticEligible": [true],
         "bestProductId": "fixture-candidate-006a",
         "bestConfidence": "medium",
         "cheaper": false,
@@ -261,6 +268,7 @@
         "similarities": [1, 1],
         "confidences": ["medium", "high"],
         "comparables": [true, true],
+        "semanticEligible": [true, true],
         "bestProductId": "fixture-candidate-007b",
         "bestConfidence": "high",
         "cheaper": true,
@@ -298,7 +306,7 @@
           "description": "500 g / light",
           "amount": 500,
           "unit": "g",
-          "current_price": 15,
+          "current_price": 10,
           "quantity": 1
         }
       ],
@@ -307,8 +315,9 @@
         "similarities": [1, 0.6666666666666666],
         "confidences": ["high", "medium"],
         "comparables": [true, true],
-        "bestProductId": "fixture-candidate-008b",
-        "bestConfidence": "medium",
+        "semanticEligible": [true, true],
+        "bestProductId": "fixture-candidate-008a",
+        "bestConfidence": "high",
         "cheaper": true,
         "saving": 3.75
       }

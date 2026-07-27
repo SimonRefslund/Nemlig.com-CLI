@@ -64,6 +64,7 @@ test("search posts the RPC payload the goma.gg web client uses", async () => {
   assert.equal(body.p_search_term, "kaffe");
   assert.equal(body.p_on_sale_only, true);
   assert.deepEqual(body.p_store_filter, ["Netto"]);
+  assert.equal(body.p_labels_filter, null);
   assert.equal(body.p_limit_val, 5);
   assert.equal(body.p_offset_val, 10);
   assert.match(body.p_order_by_clause, /discount_percentage DESC/);
@@ -74,6 +75,22 @@ test("search posts the RPC payload the goma.gg web client uses", async () => {
   assert.deepEqual(result.products, [{ product_name: "Kaffe" }]);
   assert.equal(result.total, 7);
   assert.equal(result.onSale, 2);
+});
+
+test("search serializes explicit labels without guessing defaults", async () => {
+  const bodies = [];
+  const api = new GomaApi({
+    fetchImpl: async (_url, options) => {
+      bodies.push(JSON.parse(options.body));
+      return jsonResponse({ products: [] });
+    },
+  });
+
+  await api.search("mælk");
+  await api.search("mælk", { labels: ["verified-label"] });
+
+  assert.equal(bodies[0].p_labels_filter, null);
+  assert.deepEqual(bodies[1].p_labels_filter, ["verified-label"]);
 });
 
 test("an unknown sort key is rejected before any request", async () => {

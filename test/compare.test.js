@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   compareBasket,
   describeBasketLine,
+  extractSemanticAttributes,
   parsePackSize,
   scoreCandidate,
   similarity,
@@ -56,6 +57,11 @@ test("grocery decision fixtures cover the eight unique case families", () => {
       fixture.expectedCurrent.confidences.length,
       `${fixture.id}: one confidence per candidate`,
     );
+    assert.equal(
+      fixture.candidates.length,
+      fixture.expectedCurrent.semanticEligible.length,
+      `${fixture.id}: one semantic eligibility decision per candidate`,
+    );
 
     for (const [index, candidate] of fixture.candidates.entries()) {
       assert.match(candidate.product_id, /^fixture-candidate-/);
@@ -102,6 +108,11 @@ test("fixture candidates characterize current confidence scoring", () => {
       fixture.expectedCurrent.comparables,
       `${fixture.id}: comparable`,
     );
+    assert.deepEqual(
+      scores.map(({ semanticEligible }) => semanticEligible),
+      fixture.expectedCurrent.semanticEligible,
+      `${fixture.id}: semantic eligibility`,
+    );
   }
 });
 
@@ -116,6 +127,11 @@ test("fixture cases characterize current basket comparisons", async () => {
     assert.equal(row.best?.productId ?? null, fixture.expectedCurrent.bestProductId, fixture.id);
     assert.equal(row.best?.confidence ?? null, fixture.expectedCurrent.bestConfidence, fixture.id);
     assert.equal(row.cheaper, fixture.expectedCurrent.cheaper, fixture.id);
+    assert.deepEqual(
+      row.rejected.map(({ rejectionReason }) => rejectionReason),
+      fixture.expectedCurrent.rejectionReasons ?? [],
+      `${fixture.id}: rejection reasons`,
+    );
     assert.equal(
       row.saving.toFixed(2),
       fixture.expectedCurrent.saving.toFixed(2),
@@ -145,7 +161,7 @@ test("fixture cases characterize current basket comparisons", async () => {
   }
 });
 
-test("current behavior: organic words are stop words during matching", () => {
+test("organic semantics are preserved separately from lexical similarity", () => {
   const organic = compareCases.find(({ id }) => id === "organic-source-organic-candidate");
   const conventional = compareCases.find(
     ({ id }) => id === "organic-source-conventional-candidate",
@@ -153,13 +169,39 @@ test("current behavior: organic words are stop words during matching", () => {
 
   assert.equal(similarity(organic.source.Name, organic.candidates[0].product_name), 1);
   assert.equal(similarity(conventional.source.Name, conventional.candidates[0].product_name), 1);
-  assert.equal(
-    scoreCandidate(
-      describeBasketLine(conventional.source),
-      fixtureCandidateForScoring(conventional.candidates[0]),
-    ).confidence,
-    "high",
+  assert.deepEqual(extractSemanticAttributes("Mayonnaise Light øko."), {
+    organic: true,
+    variants: ["light"],
+  });
+
+  const organicScore = scoreCandidate(
+    describeBasketLine(organic.source),
+    fixtureCandidateForScoring(organic.candidates[0]),
   );
+  assert.equal(organicScore.semanticEligible, true);
+  assert.equal(organicScore.semanticMatch.organic, true);
+
+  const conventionalScore = scoreCandidate(
+    describeBasketLine(conventional.source),
+    fixtureCandidateForScoring(conventional.candidates[0]),
+  );
+  assert.equal(conventionalScore.confidence, "high");
+  assert.equal(conventionalScore.semanticEligible, false);
+  assert.equal(conventionalScore.rejectionReason, "organic_mismatch");
+  assert.equal(conventionalScore.sourceSemantics.organic, true);
+  assert.equal(conventionalScore.candidateSemantics.organic, false);
+});
+
+test("a conventional source keeps normal matching behavior", () => {
+  const fixture = compareCases.find(({ id }) => id === "exact-same-product-same-pack");
+  const score = scoreCandidate(
+    describeBasketLine(fixture.source),
+    fixtureCandidateForScoring(fixture.candidates[0]),
+  );
+  assert.equal(score.sourceSemantics.organic, false);
+  assert.equal(score.candidateSemantics.organic, false);
+  assert.equal(score.semanticEligible, true);
+  assert.equal(score.confidence, "high");
 });
 
 test("cash savings require whole rival packs and value surplus at zero", async () => {
@@ -283,6 +325,78 @@ test("whole-pack economics cover smaller and larger rival packs", async () => {
     assert.equal(rows[0].best.surplusAmount, fixture.surplusAmount, fixture.name);
     assert.equal(rows[0].best.purchaseCost, fixture.purchaseCost, fixture.name);
   }
+});
+
+test("high confidence wins while a cheaper medium candidate remains visible", async () => {
+  const fixture = compareCases.find(
+    ({ id }) => id === "high-confidence-plus-cheaper-medium",
+  );
+  const { rows } = await compareBasket(
+    { TotalPrice: fixture.source.Price, Lines: [fixture.source] },
+    fixtureGoma(fixture.candidates),
+  );
+  const [row] = rows;
+
+  assert.equal(row.best.productId, "fixture-candidate-008a");
+  assert.equal(row.best.confidence, "high");
+  assert.equal(row.best.purchaseCost, 15);
+  assert.equal(row.selectionReason, "high_confidence_preferred");
+  assert.deepEqual(
+    row.alternatives.map(({ productId, confidence, purchaseCost, selectionRank }) => ({
+      productId,
+      confidence,
+      purchaseCost,
+      selectionRank,
+    })),
+    [
+      {
+        productId: "fixture-candidate-008a",
+        confidence: "high",
+        purchaseCost: 15,
+        selectionRank: 1,
+      },
+      {
+        productId: "fixture-candidate-008b",
+        confidence: "medium",
+        purchaseCost: 10,
+        selectionRank: 2,
+      },
+    ],
+  );
+});
+
+test("medium confidence wins only when no high candidate is eligible", async () => {
+  const fixture = compareCases.find(({ id }) => id === "demand-950g-rival-700g");
+  const { rows } = await compareBasket(
+    { TotalPrice: fixture.source.Price, Lines: [fixture.source] },
+    fixtureGoma(fixture.candidates),
+  );
+
+  assert.equal(rows[0].best.confidence, "medium");
+  assert.equal(rows[0].selectionReason, "medium_confidence_fallback");
+});
+
+test("summary totals are split by selected confidence tier", async () => {
+  const high = compareCases.find(({ id }) => id === "high-confidence-plus-cheaper-medium");
+  const medium = compareCases.find(({ id }) => id === "demand-950g-rival-700g");
+
+  const highResult = await compareBasket(
+    { TotalPrice: high.source.Price, Lines: [high.source] },
+    fixtureGoma(high.candidates),
+  );
+  assert.deepEqual(highResult.summary.confidenceTiers, {
+    high: { compared: 1, cheaperElsewhere: 1, estimatedSavings: 3.75 },
+    medium: { compared: 0, cheaperElsewhere: 0, estimatedSavings: 0 },
+  });
+
+  const mediumResult = await compareBasket(
+    { TotalPrice: medium.source.Price, Lines: [medium.source] },
+    fixtureGoma(medium.candidates),
+  );
+  assert.deepEqual(mediumResult.summary.confidenceTiers, {
+    high: { compared: 0, cheaperElsewhere: 0, estimatedSavings: 0 },
+    medium: { compared: 1, cheaperElsewhere: 0, estimatedSavings: 0 },
+  });
 });
 
 test("pack sizes are read from nemlig descriptions", () => {

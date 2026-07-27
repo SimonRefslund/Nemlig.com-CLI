@@ -225,6 +225,13 @@ IDs, lines are matched on name similarity and pack size:
   compared against a 800 g one.
 - Matches are rated `high`, `medium`, or `low`; only `high` and `medium` count
   toward the savings estimate, and `medium` rows are printed with a `?`.
+- An explicitly organic basket line only accepts a rival whose name or brand
+  also explicitly says `øko`, `økologisk`, or `organic`. Organic requirements
+  are checked separately from fuzzy name similarity.
+- A high-confidence candidate always wins over medium-confidence candidates.
+  Within a tier, whole-pack cash cost is lowest first, then matcher score,
+  normalized unit price, store, and product name provide deterministic
+  tie-breakers.
 - Cash savings compare the current nemlig.com line total with enough whole
   rival packs to cover that amount. Any surplus is valued at zero rather than
   treated as future savings.
@@ -255,6 +262,10 @@ but the pack is a different size or the name match is looser. The displayed
 saving accounts for whole packs; surplus product has no assigned value. Treat
 the total as a guide, not a quote. `--sort` accepts `relevance`, `price-asc`,
 `price-desc`, `discount`, `name-asc`, and `name-desc`.
+
+The Goma client accepts an explicit `labels` filter for callers that know a
+verified goma.gg label value, but comparison does not guess or enable an
+undocumented organic label. Text-based organic enforcement is authoritative.
 
 The client uses the publishable, RLS-protected key that goma.gg's own web app
 ships with, and opts out of their search analytics. goma.gg also offers a
