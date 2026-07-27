@@ -514,7 +514,7 @@ export function renderGomaProducts(result, { columns = 100 } = {}) {
   return lines.join("\n");
 }
 
-export function renderComparison(result, { columns = 100, history = false } = {}) {
+export function renderComparison(result, { columns = 100, history = false, links = false } = {}) {
   const { rows, summary } = result;
   if (!rows.length) return "Basket is empty; nothing to compare.";
 
@@ -553,6 +553,9 @@ export function renderComparison(result, { columns = 100, history = false } = {}
         `${marker} ${row.line.name} (${packLabel(row.line.pack)})` +
           ` → ${row.best.store}: ${row.best.name} (${packLabel(row.best.pack)})${validity}`,
       );
+      if (links && row.best.url) {
+        out.push(`    ${row.best.url}`);
+      }
       const past = row.best.history;
       if (history && past && !past.insufficientData) {
         out.push(
