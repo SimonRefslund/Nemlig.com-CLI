@@ -24,12 +24,69 @@ function padStart(value, width) {
   return truncate(value, width).padStart(width);
 }
 
-function unitPrice(product) {
-  return product.UnitPriceCalc == null
+function finitePositive(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+export function effectiveNemligPrice(product, { quantity = 1 } = {}) {
+  const campaign = product?.Campaign ?? {};
+  const basePrice = finitePositive(product?.Price);
+  const baseUnitPrice = finitePositive(product?.UnitPriceCalc);
+  const campaignPrice = finitePositive(campaign.CampaignPrice);
+  const campaignUnitPrice = finitePositive(campaign.CampaignUnitPrice);
+  const minQuantity = finitePositive(campaign.MinQuantity);
+  const totalPrice = finitePositive(campaign.TotalPrice);
+  const quantityOffer = minQuantity > 1 && totalPrice != null
+    ? { minQuantity, totalPrice }
+    : null;
+  const eligible = !quantityOffer || Number(quantity) >= minQuantity;
+  const campaignApplied = eligible &&
+    (campaignPrice != null || campaignUnitPrice != null);
+
+  return {
+    price: campaignApplied ? campaignPrice ?? basePrice : basePrice,
+    unitPrice: campaignApplied ? campaignUnitPrice ?? baseUnitPrice : baseUnitPrice,
+    basePrice,
+    baseUnitPrice,
+    campaignPrice,
+    campaignUnitPrice,
+    campaignApplied,
+    quantityOffer,
+  };
+}
+
+function formattedUnitPrice(value, label) {
+  return value == null
     ? "—"
-    : `${Number(product.UnitPriceCalc).toLocaleString("da-DK")} ${
-      product.UnitPriceLabel || ""
-    }`.trim();
+    : `${value.toLocaleString("da-DK")} ${label || ""}`.trim();
+}
+
+function unitPrice(product) {
+  const effective = effectiveNemligPrice(product);
+  const current = formattedUnitPrice(effective.unitPrice, product.UnitPriceLabel);
+  if (!effective.campaignApplied || effective.baseUnitPrice == null ||
+      effective.unitPrice === effective.baseUnitPrice) {
+    return current;
+  }
+  return `${current} (base ${
+    formattedUnitPrice(effective.baseUnitPrice, product.UnitPriceLabel)
+  })`;
+}
+
+function productPrice(product) {
+  const effective = effectiveNemligPrice(product);
+  if (effective.quantityOffer) {
+    return `${formatPrice(effective.basePrice)} (${
+      effective.quantityOffer.minQuantity
+    } for ${formatPrice(effective.quantityOffer.totalPrice)})`;
+  }
+  const current = formatPrice(effective.price);
+  if (!effective.campaignApplied || effective.basePrice == null ||
+      effective.price === effective.basePrice) {
+    return current;
+  }
+  return `${current} (base ${formatPrice(effective.basePrice)})`;
 }
 
 // nemlig.com returns dates as "2026-07-26T00:00:00" with no zone. Reading the
@@ -72,15 +129,45 @@ function formatWindow(start, end) {
 export function renderProducts(products, { total, offset = 0, columns = 100 } = {}) {
   if (!products.length) return "No products found.";
 
-  const widths = columns < 80
-    ? [8, 26, 12, 12]
-    : [8, Math.min(38, columns - 61), 18, 13, 14];
+  const prices = products.map(productPrice);
+  const unitPrices = products.map(unitPrice);
+  let widths;
+  if (columns < 80) {
+    const available = Math.max(24, columns - 26);
+    const priceWidth = Math.min(
+      Math.max(12, ...prices.map((price) => price.length)),
+      Math.max(12, available - 12),
+    );
+    widths = [8, Math.max(12, available - priceWidth), 12, priceWidth];
+  } else {
+    const available = Math.max(24, columns - 16);
+    const maxPriceAndUnit = Math.max(27, available - 24);
+    let priceWidth = Math.min(31, Math.max(13, ...prices.map((price) => price.length)));
+    let unitPriceWidth = Math.min(
+      32,
+      Math.max(14, ...unitPrices.map((price) => price.length)),
+    );
+    while (priceWidth + unitPriceWidth > maxPriceAndUnit) {
+      if (unitPriceWidth > 14 && unitPriceWidth >= priceWidth) unitPriceWidth -= 1;
+      else if (priceWidth > 13) priceWidth -= 1;
+      else break;
+    }
+    const textWidth = available - priceWidth - unitPriceWidth;
+    const brandWidth = Math.min(18, Math.max(10, textWidth - 38));
+    widths = [
+      8,
+      Math.max(14, Math.min(38, textWidth - brandWidth)),
+      brandWidth,
+      priceWidth,
+      unitPriceWidth,
+    ];
+  }
   const compact = widths.length === 4;
   const headers = compact
     ? ["ID", "NAME", "BRAND", "PRICE"]
     : ["ID", "NAME", "BRAND", "PRICE", "UNIT PRICE"];
 
-  const rows = products.map((product) => {
+  const rows = products.map((product, index) => {
     const unavailable = product.Availability &&
       !(product.Availability.IsDeliveryAvailable &&
         product.Availability.IsAvailableInStock);
@@ -88,9 +175,9 @@ export function renderProducts(products, { total, offset = 0, columns = 100 } = 
       product.Id,
       unavailable ? `${product.Name} (sold out)` : product.Name,
       product.Brand || "—",
-      formatPrice(product.Price),
+      prices[index],
     ];
-    if (!compact) base.push(unitPrice(product));
+    if (!compact) base.push(unitPrices[index]);
     return base;
   });
 
@@ -126,12 +213,13 @@ export function renderSuggestions(result) {
 }
 
 export function renderProduct(product) {
+  const effective = effectiveNemligPrice(product);
   const lines = [
     product.Name,
     `${product.Brand || "Unknown brand"} · ${product.Description || "No description"}`,
     "",
     `ID:          ${product.Id}`,
-    `Price:       ${formatPrice(product.Price)}`,
+    `Price:       ${productPrice(product)}`,
     `Unit price:  ${unitPrice(product)}`,
     `Available:   ${
       product.Availability?.IsDeliveryAvailable &&
@@ -152,8 +240,10 @@ export function renderProduct(product) {
     const campaign = product.Campaign;
     lines.push(
       `Campaign:    ${product.CampaignAttribute || campaign.Type}${
-        campaign.TotalPrice
-          ? ` (${campaign.MinQuantity} for ${formatPrice(campaign.TotalPrice)})`
+        effective.quantityOffer
+          ? ` (${effective.quantityOffer.minQuantity} for ${
+            formatPrice(effective.quantityOffer.totalPrice)
+          })`
           : ""
       }`,
     );

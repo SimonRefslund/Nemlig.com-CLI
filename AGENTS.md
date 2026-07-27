@@ -92,6 +92,11 @@ accepted.
                   "Availability": { "IsDeliveryAvailable": true, "IsAvailableInStock": true } } ] }
 ```
 
+Human output prefers positive finite `Campaign.CampaignPrice` and
+`Campaign.CampaignUnitPrice`, showing the base price alongside a different
+campaign price. A quantity campaign is not applied to one item: its
+`MinQuantity` and `TotalPrice` are shown separately until the threshold is met.
+
 `basket` — raw nemlig.com response. The fields that matter:
 
 ```json
@@ -146,15 +151,27 @@ kr overall and still have `IsMinTotalValid: false`.
                         "pack": { "amount": 500, "base": "g" } },
               "best": { "store": "Lidl", "name": "Combino Fusilli",
                         "unitPrice": 0.0119, "confidence": "high",
+                        "requiredAmount": 500, "packsNeeded": 1,
+                        "purchaseAmount": 500, "surplusAmount": 0,
+                        "purchaseCost": 5.95,
+                        "normalizedCostForRequiredAmount": 5.95,
+                        "normalizedSaving": 11.42,
                         "onSale": false, "saleValidTo": null },
-              "cheaper": true, "saving": 11.42, "alternatives": [], "error": null } ],
+              "cheaper": true, "saving": 11.42,
+              "normalizedSaving": 11.42, "alternatives": [], "error": null } ],
   "summary": { "lines": 15, "compared": 13, "cheaperElsewhere": 6,
                "uncomparable": 2, "failed": 0,
                "estimatedSavings": 79.42, "basketTotal": 653.46 } }
 ```
 
 `unitPrice` is per gram / millilitre / piece — multiply by 1000 for kr/kg or
-kr/l. `best` is `null` when nothing comparable was found.
+kr/l. `requiredAmount` is the basket demand in that base unit.
+`packsNeeded` is rounded up to a whole rival pack; `purchaseCost` is the cash
+outlay for those packs, and `surplusAmount` receives zero value. `saving`
+compares that whole-pack outlay with the nemlig.com line total.
+`normalizedCostForRequiredAmount` and `normalizedSaving` retain exact-volume
+analysis, but must not be presented as checkout cash. `best` is `null` when
+nothing comparable was found.
 
 `checkout status` — `readiness` is all booleans; check them before telling a
 user the order is ready.
@@ -213,9 +230,10 @@ similarity and pack size, then normalised to a price per gram/ml/piece.
 
 Only `high` and `medium` count toward `estimatedSavings`. A `medium` row often
 means a 375 g jar compared against an 800 g one: the per-kilo maths is right,
-but it is a different purchase. **Report the matched product name, not just the
-number**, and never tell a user they will save X kr — tell them what the
-comparison found.
+but it is a different purchase. Cash savings require enough whole rival packs
+to cover the basket amount and assign no value to surplus. **Report the matched
+product name, not just the number**, and never tell a user they will save X kr
+— tell them what the comparison found.
 
 ## Recipes
 

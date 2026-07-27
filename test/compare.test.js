@@ -72,7 +72,7 @@ test("grocery decision fixtures cover the eight unique case families", () => {
 test("fixture descriptions characterize current pack parsing", () => {
   for (const fixture of compareCases) {
     assert.deepEqual(
-      parsePackSize(fixture.source.Description),
+      describeBasketLine(fixture.source).pack,
       fixture.expectedCurrent.parsedPack,
       fixture.id,
     );
@@ -121,6 +121,27 @@ test("fixture cases characterize current basket comparisons", async () => {
       fixture.expectedCurrent.saving.toFixed(2),
       fixture.id,
     );
+    for (const candidate of row.alternatives) {
+      for (const field of [
+        "requiredAmount",
+        "packsNeeded",
+        "purchaseAmount",
+        "surplusAmount",
+        "purchaseCost",
+        "normalizedCostForRequiredAmount",
+        "normalizedSaving",
+      ]) {
+        assert.ok(Number.isFinite(candidate[field]), `${fixture.id}: finite ${field}`);
+      }
+    }
+    if (fixture.expectedCurrent.bestEconomics) {
+      for (const [field, value] of Object.entries(fixture.expectedCurrent.bestEconomics)) {
+        assert.ok(
+          Math.abs(row.best[field] - value) < 1e-9,
+          `${fixture.id}: ${field}`,
+        );
+      }
+    }
   }
 });
 
@@ -141,23 +162,127 @@ test("current behavior: organic words are stop words during matching", () => {
   );
 });
 
-test("current behavior: savings allow fractional rival packs", async () => {
+test("cash savings require whole rival packs and value surplus at zero", async () => {
   const fixture = compareCases.find(({ id }) => id === "demand-950g-rival-700g");
   const { rows } = await compareBasket({
     TotalPrice: fixture.source.Price,
     Lines: [fixture.source],
   }, fixtureGoma(fixture.candidates));
 
-  // The estimate prices exactly 950 g at the rival's per-gram rate (1.36 packs),
-  // rather than requiring the purchase of two whole 700 g packs.
-  assert.equal(rows[0].saving.toFixed(2), "4.75");
+  assert.equal(rows[0].best.packsNeeded, 2);
+  assert.equal(rows[0].best.purchaseAmount, 1400);
+  assert.equal(rows[0].best.surplusAmount, 450);
+  assert.equal(rows[0].best.purchaseCost, 51);
+  assert.equal(rows[0].normalizedSaving.toFixed(2), "3.15");
+  assert.equal(rows[0].cheaper, false);
+  assert.equal(rows[0].saving, 0);
 });
 
-test("current behavior: canned descriptions use the first weight", () => {
+test("official unit price disambiguates gross and drained weights", () => {
   const fixture = compareCases.find(
     ({ id }) => id === "canned-product-gross-and-drained-weight",
   );
-  assert.deepEqual(parsePackSize(fixture.source.Description), { amount: 400, base: "g" });
+  const line = describeBasketLine(fixture.source);
+  assert.deepEqual(line.packMeasurements, [
+    { amount: 400, base: "g" },
+    { amount: 240, base: "g" },
+  ]);
+  assert.deepEqual(line.pack, { amount: 240, base: "g" });
+  assert.equal(line.packAmbiguity, null);
+});
+
+test("multipack totals are preserved when the official unit price agrees", () => {
+  const line = describeBasketLine({
+    Id: "multipack",
+    Name: "Dåsetomater",
+    Brand: "Solmark",
+    Description: "12 x 400 g",
+    Quantity: 1,
+    Price: 120,
+    UnitPriceCalc: 25,
+    UnitPriceLabel: "kr/kg",
+  });
+
+  assert.deepEqual(line.packMeasurements, [
+    { amount: 4800, base: "g" },
+    { amount: 400, base: "g" },
+  ]);
+  assert.deepEqual(line.pack, { amount: 4800, base: "g" });
+  assert.equal(line.packAmbiguity, null);
+});
+
+test("materially inconsistent pack evidence is exposed", () => {
+  const line = describeBasketLine({
+    Id: "ambiguous",
+    Name: "Dåsetomater",
+    Brand: "Solmark",
+    Description: "400 g / 240 g drænet",
+    Quantity: 1,
+    Price: 18,
+    UnitPriceCalc: 60,
+    UnitPriceLabel: "kr/kg",
+  });
+
+  assert.deepEqual(line.packImpliedByUnitPrice, { amount: 300, base: "g" });
+  assert.deepEqual(line.pack, { amount: 240, base: "g" });
+  assert.equal(line.packAmbiguity.reason, "unit-price-amount-mismatch");
+});
+
+test("whole-pack economics cover smaller and larger rival packs", async () => {
+  const cases = [
+    {
+      name: "Ærter",
+      sourceAmount: 500,
+      sourcePrice: 20,
+      rivalAmount: 400,
+      rivalPrice: 6,
+      packsNeeded: 2,
+      purchaseAmount: 800,
+      surplusAmount: 300,
+      purchaseCost: 12,
+    },
+    {
+      name: "Mozzarella",
+      sourceAmount: 200,
+      sourcePrice: 15,
+      rivalAmount: 500,
+      rivalPrice: 12,
+      packsNeeded: 1,
+      purchaseAmount: 500,
+      surplusAmount: 300,
+      purchaseCost: 12,
+    },
+  ];
+
+  for (const fixture of cases) {
+    const source = {
+      Id: fixture.name,
+      Name: fixture.name,
+      Brand: "Fixture",
+      Description: `${fixture.sourceAmount} g`,
+      Quantity: 1,
+      Price: fixture.sourcePrice,
+    };
+    const candidate = {
+      product_id: `fixture-${fixture.name}`,
+      store_name: "Fixture Market",
+      product_name: fixture.name,
+      brand: "Fixture",
+      amount: fixture.rivalAmount,
+      unit: "g",
+      current_price: fixture.rivalPrice,
+    };
+    const { rows } = await compareBasket(
+      { TotalPrice: source.Price, Lines: [source] },
+      fixtureGoma([candidate]),
+    );
+
+    assert.equal(rows[0].best.requiredAmount, fixture.sourceAmount, fixture.name);
+    assert.equal(rows[0].best.packsNeeded, fixture.packsNeeded, fixture.name);
+    assert.equal(rows[0].best.purchaseAmount, fixture.purchaseAmount, fixture.name);
+    assert.equal(rows[0].best.surplusAmount, fixture.surplusAmount, fixture.name);
+    assert.equal(rows[0].best.purchaseCost, fixture.purchaseCost, fixture.name);
+  }
 });
 
 test("pack sizes are read from nemlig descriptions", () => {

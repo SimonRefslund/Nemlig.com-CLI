@@ -149,7 +149,9 @@
         "Brand": "Solmark",
         "Description": "400 g / 240 g drænet",
         "Quantity": 1,
-        "Price": 18
+        "Price": 18,
+        "UnitPriceCalc": 75,
+        "UnitPriceLabel": "kr/kg"
       },
       "candidates": [
         {
@@ -165,14 +167,14 @@
         }
       ],
       "expectedCurrent": {
-        "parsedPack": { "amount": 400, "base": "g" },
+        "parsedPack": { "amount": 240, "base": "g" },
         "similarities": [1],
-        "confidences": ["medium"],
+        "confidences": ["high"],
         "comparables": [true],
         "bestProductId": "fixture-candidate-005a",
-        "bestConfidence": "medium",
+        "bestConfidence": "high",
         "cheaper": true,
-        "saving": 4
+        "saving": 9.6
       }
     },
     {
@@ -184,7 +186,7 @@
         "Brand": "Mælkeengen",
         "Description": "950 g / 10 %",
         "Quantity": 1,
-        "Price": 28.5
+        "Price": 37.76
       },
       "candidates": [
         {
@@ -195,7 +197,7 @@
           "description": "700 g / 10 %",
           "amount": 700,
           "unit": "g",
-          "current_price": 17.5,
+          "current_price": 25.5,
           "quantity": 1
         }
       ],
@@ -206,8 +208,17 @@
         "comparables": [true],
         "bestProductId": "fixture-candidate-006a",
         "bestConfidence": "medium",
-        "cheaper": true,
-        "saving": 4.75
+        "cheaper": false,
+        "saving": 0,
+        "bestEconomics": {
+          "requiredAmount": 950,
+          "packsNeeded": 2,
+          "purchaseAmount": 1400,
+          "surplusAmount": 450,
+          "purchaseCost": 51,
+          "normalizedCostForRequiredAmount": 34.607142857142854,
+          "normalizedSaving": 3.152857142857144
+        }
       }
     },
     {
@@ -299,7 +310,7 @@
         "bestProductId": "fixture-candidate-008b",
         "bestConfidence": "medium",
         "cheaper": true,
-        "saving": 7.5
+        "saving": 3.75
       }
     }
   ]

@@ -108,7 +108,7 @@ export function toBaseAmount(amount, unit) {
  * Weight and volume win, because that is the basis goma.gg reports and the
  * only one that compares meaningfully across brands.
  */
-export function parsePackSize(text) {
+function parsePackMeasurements(text) {
   const source = String(text ?? "").toLowerCase().replace(/,/g, ".");
   const units = Object.keys(UNIT_SCALE).sort((a, b) => b.length - a.length).join("|");
   const found = [];
@@ -128,7 +128,20 @@ export function parsePackSize(text) {
     if (parsed) found.push(parsed);
   }
 
-  return found.find((entry) => entry.base !== "stk") ?? found[0] ?? null;
+  const preferred = found.some((entry) => entry.base !== "stk")
+    ? found.filter((entry) => entry.base !== "stk")
+    : found;
+  const seen = new Set();
+  return preferred.filter((entry) => {
+    const key = `${entry.base}:${entry.amount}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function parsePackSize(text) {
+  return parsePackMeasurements(text)[0] ?? null;
 }
 
 /** nemlig's own unit price, e.g. UnitPriceCalc 139.38 with "kr./Kg.". */
@@ -143,13 +156,64 @@ function packFromUnitPrice(line, perItemPrice) {
   return { amount: (perItemPrice / rate) * scale, base };
 }
 
+function resolvePack(line, perItemPrice) {
+  const measurements = parsePackMeasurements(line?.Description);
+  const implied = packFromUnitPrice(line, perItemPrice);
+  if (!measurements.length) {
+    return {
+      pack: implied,
+      packMeasurements: [],
+      packImpliedByUnitPrice: implied,
+      packAmbiguity: null,
+    };
+  }
+
+  const comparable = implied
+    ? measurements.filter((measurement) => measurement.base === implied.base)
+    : measurements;
+  const choices = comparable.length ? comparable : measurements;
+  const pack = implied
+    ? choices.toSorted((a, b) =>
+      Math.abs(a.amount - implied.amount) - Math.abs(b.amount - implied.amount)
+    )[0]
+    : choices[0];
+
+  const relativeDifference = implied && pack.base === implied.base
+    ? Math.abs(pack.amount - implied.amount) / implied.amount
+    : null;
+  const multipleAmounts = choices.some((choice) =>
+    choice.base !== pack.base || choice.amount !== pack.amount);
+  const materiallyInconsistent = relativeDifference != null && relativeDifference > 0.1;
+  const incompatibleUnit = Boolean(implied && !comparable.length);
+  const packAmbiguity = materiallyInconsistent || incompatibleUnit ||
+      (!implied && multipleAmounts)
+    ? {
+      reason: incompatibleUnit
+        ? "unit-price-base-mismatch"
+        : materiallyInconsistent
+        ? "unit-price-amount-mismatch"
+        : "multiple-description-amounts",
+      measurements,
+      implied,
+    }
+    : null;
+
+  return {
+    pack,
+    packMeasurements: measurements,
+    packImpliedByUnitPrice: implied,
+    packAmbiguity,
+  };
+}
+
 export function describeBasketLine(line) {
   const quantity = Math.max(1, Number(line?.Quantity ?? 1));
   const total = Number(line?.Price);
   const perItem = Number.isFinite(total) && total > 0
     ? total / quantity
     : Number(line?.ItemPrice);
-  const pack = parsePackSize(line?.Description) ?? packFromUnitPrice(line, perItem);
+  const packResolution = resolvePack(line, perItem);
+  const { pack } = packResolution;
   return {
     id: String(line?.Id ?? ""),
     name: line?.Name ?? "Product",
@@ -159,6 +223,7 @@ export function describeBasketLine(line) {
     perItem: Number.isFinite(perItem) ? perItem : null,
     pack,
     unitPrice: pack && Number.isFinite(perItem) ? perItem / pack.amount : null,
+    ...packResolution,
   };
 }
 
@@ -212,6 +277,27 @@ export function scoreCandidate(line, candidate) {
 
 const COUNTED = new Set(["high", "medium"]);
 
+function addPurchaseEconomics(line, candidate) {
+  const requiredAmount = line.pack.amount * line.quantity;
+  const packsNeeded = Math.ceil(requiredAmount / candidate.pack.amount);
+  const purchaseAmount = packsNeeded * candidate.pack.amount;
+  const surplusAmount = purchaseAmount - requiredAmount;
+  const purchaseCost = packsNeeded * candidate.price;
+  const normalizedCostForRequiredAmount = candidate.unitPrice * requiredAmount;
+  const nemligCashCost = line.perItem * line.quantity;
+  const normalizedSaving = nemligCashCost - normalizedCostForRequiredAmount;
+  return {
+    ...candidate,
+    requiredAmount,
+    packsNeeded,
+    purchaseAmount,
+    surplusAmount,
+    purchaseCost,
+    normalizedCostForRequiredAmount,
+    normalizedSaving,
+  };
+}
+
 /**
  * Looks each basket line up on goma.gg and reports the cheapest comparable
  * alternative outside nemlig.com.
@@ -230,7 +316,8 @@ export async function compareBasket(basket, goma, {
       .map(describeCandidate)
       .filter((candidate) => candidate.store !== NEMLIG_STORE && candidate.unitPrice != null)
       .map((candidate) => ({ ...candidate, ...scoreCandidate(line, candidate) }))
-      .filter((candidate) => candidate.comparable && candidate.confidence !== "low");
+      .filter((candidate) => candidate.comparable && candidate.confidence !== "low")
+      .map((candidate) => addPurchaseEconomics(line, candidate));
 
   let done = 0;
   const results = await mapWithLimit(lines, concurrency, async (line) => {
@@ -262,16 +349,27 @@ export async function compareBasket(basket, goma, {
     }
     onProgress?.(++done, lines.length);
 
-    rated.sort((a, b) => a.unitPrice - b.unitPrice);
+    rated.sort((a, b) => a.purchaseCost - b.purchaseCost || a.unitPrice - b.unitPrice);
 
     const best = rated[0] ?? null;
-    const cheaper = Boolean(best && line.unitPrice != null && best.unitPrice < line.unitPrice);
-    // Savings scale to the volume actually in the basket, not to one pack.
+    const nemligCashCost = line.perItem * line.quantity;
+    const cheaper = Boolean(best && Number.isFinite(nemligCashCost) &&
+      best.purchaseCost < nemligCashCost);
+    // Cash savings value surplus at zero: every rival pack must be purchased.
     const saving = cheaper
-      ? (line.unitPrice - best.unitPrice) * line.pack.amount * line.quantity
+      ? nemligCashCost - best.purchaseCost
       : 0;
+    const normalizedSaving = best?.normalizedSaving ?? 0;
 
-    return { line, best, alternatives: rated.slice(0, 3), cheaper, saving, error };
+    return {
+      line,
+      best,
+      alternatives: rated.slice(0, 3),
+      cheaper,
+      saving,
+      normalizedSaving,
+      error,
+    };
   });
 
   const compared = results.filter((row) => row.best && COUNTED.has(row.best.confidence));

@@ -73,6 +73,11 @@ Product IDs used by basket commands are shown by `search` and `product`.
 Only the full slug is addressable on nemlig.com, so `product <id>` resolves the
 slug through search first — one extra request.
 
+Human-readable search and product output uses the active campaign price when
+nemlig.com supplies one, with the base price shown alongside it. Multi-buy
+campaigns remain at the single-item base price and show their quantity
+threshold and total separately.
+
 Options accept `--limit 5` and `--limit=5`. Use `--` to end option parsing when
 a search term starts with a dash.
 
@@ -220,7 +225,12 @@ IDs, lines are matched on name similarity and pack size:
   compared against a 800 g one.
 - Matches are rated `high`, `medium`, or `low`; only `high` and `medium` count
   toward the savings estimate, and `medium` rows are printed with a `?`.
-- Savings scale to the quantity actually in your basket.
+- Cash savings compare the current nemlig.com line total with enough whole
+  rival packs to cover that amount. Any surplus is valued at zero rather than
+  treated as future savings.
+- JSON output also retains the normalized cost and saving for the exact
+  required amount, so per-kilo analysis remains available without being
+  mistaken for checkout cash.
 - A line whose pack size cannot be parsed is reported as unmatched rather than
   silently skipped.
 
@@ -240,9 +250,11 @@ Estimated saving:  79,42 kr.
 13 of 15 lines matched confidently · 2 unmatched
 ```
 
-The `?` marks a medium-confidence match: the per-kilo maths is right, but the
-pack is a different size. Treat the total as a guide, not a quote. `--sort` accepts `relevance`,
-`price-asc`, `price-desc`, `discount`, `name-asc`, and `name-desc`.
+The `?` marks a medium-confidence match: the products are comparable per unit,
+but the pack is a different size or the name match is looser. The displayed
+saving accounts for whole packs; surplus product has no assigned value. Treat
+the total as a guide, not a quote. `--sort` accepts `relevance`, `price-asc`,
+`price-desc`, `discount`, `name-asc`, and `name-desc`.
 
 The client uses the publishable, RLS-protected key that goma.gg's own web app
 ships with, and opts out of their search analytics. goma.gg also offers a

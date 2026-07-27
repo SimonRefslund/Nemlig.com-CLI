@@ -2,15 +2,92 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  effectiveNemligPrice,
   minimumShortfall,
   renderBasket,
   renderCheckoutStatus,
   renderDeliveryDays,
   renderOrders,
+  renderProduct,
+  renderProducts,
 } from "../src/format.js";
 
 // Field names below mirror live GetBasket / GetBasicOrderHistory /
 // GetDeliveryDays responses.
+
+const percentageCampaignProduct = {
+  Id: "fixture-campaign-percentage",
+  Name: "Kaffe",
+  Brand: "Morgenstund",
+  Description: "500 g",
+  Price: 41.95,
+  UnitPriceCalc: 83.9,
+  UnitPriceLabel: "kr/kg",
+  Url: "fixture-campaign-percentage",
+  Availability: { IsDeliveryAvailable: true, IsAvailableInStock: true },
+  CampaignAttribute: "Procenttilbud",
+  Campaign: {
+    Type: "Percentage",
+    CampaignPrice: 37.76,
+    CampaignUnitPrice: 75.52,
+  },
+};
+
+test("percentage campaigns use effective price and retain base price context", () => {
+  assert.deepEqual(effectiveNemligPrice(percentageCampaignProduct), {
+    price: 37.76,
+    unitPrice: 75.52,
+    basePrice: 41.95,
+    baseUnitPrice: 83.9,
+    campaignPrice: 37.76,
+    campaignUnitPrice: 75.52,
+    campaignApplied: true,
+    quantityOffer: null,
+  });
+
+  for (const output of [
+    renderProducts([percentageCampaignProduct]),
+    renderProduct(percentageCampaignProduct),
+  ]) {
+    assert.match(output, /37,76\s*kr\./);
+    assert.match(output, /base 41,95\s*kr\./);
+    assert.match(output, /75,52 kr\/kg/);
+    assert.match(output, /base 83,9 kr\/kg/);
+  }
+});
+
+test("quantity campaigns are not applied below their threshold", () => {
+  const product = {
+    ...percentageCampaignProduct,
+    Id: "fixture-campaign-quantity",
+    Price: 20,
+    UnitPriceCalc: 40,
+    Campaign: {
+      Type: "Quantity",
+      CampaignPrice: 15,
+      CampaignUnitPrice: 30,
+      MinQuantity: 2,
+      TotalPrice: 30,
+    },
+  };
+
+  assert.deepEqual(effectiveNemligPrice(product), {
+    price: 20,
+    unitPrice: 40,
+    basePrice: 20,
+    baseUnitPrice: 40,
+    campaignPrice: 15,
+    campaignUnitPrice: 30,
+    campaignApplied: false,
+    quantityOffer: { minQuantity: 2, totalPrice: 30 },
+  });
+  assert.equal(effectiveNemligPrice(product, { quantity: 2 }).price, 15);
+
+  for (const output of [renderProducts([product]), renderProduct(product)]) {
+    assert.match(output, /20,00\s*kr\. \(2 for 30,00\s*kr\.\)/);
+    assert.doesNotMatch(output, /Price:\s+15,00\s*kr\./);
+  }
+});
 
 const basket = {
   Lines: [
