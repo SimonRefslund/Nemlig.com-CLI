@@ -9,7 +9,7 @@ branch for the complete series is `codex/price-selection-v2`.
 |---|---|---:|---:|---|---|
 | 001 | Establish grocery-decision fixtures | P1 | M | — | DONE |
 | 002 | Calculate effective prices and whole-pack cash cost | P1 | M | 001 | DONE |
-| 003 | Enforce semantic constraints and rank by confidence | P1 | M | 002 | TODO |
+| 003 | Enforce semantic constraints and rank by confidence | P1 | M | 002 | DONE |
 | 004 | Make history verdicts reliable and efficient | P2 | S | 001 | TODO |
 | 005 | Broaden retrieval and explain every decision | P2 | M | 002, 003, 004 | TODO |
 
