@@ -616,8 +616,9 @@ export function renderComparison(result, { columns = 100, history = false, links
     out.push("No basket line was cheaper elsewhere on goma.gg.");
   } else {
     const nameWidth = Math.max(18, Math.min(32, columns - 68));
+    const bestHeader = summary.truncated ? "BEST FOUND" : "BEST";
     out.push(
-      ["PRODUCT", "NEMLIG", "BEST", "STORE", "SAVE"]
+      ["PRODUCT", "NEMLIG", bestHeader, "STORE", "SAVE"]
         .map((value, index) => pad(value, [nameWidth, 15, 15, 12, 10][index]))
         .join("  ").trimEnd(),
       [nameWidth, 15, 15, 12, 10].map((width) => "─".repeat(width)).join("  "),
@@ -660,9 +661,11 @@ export function renderComparison(result, { columns = 100, history = false, links
   }
 
   const notes = [
-    `${summary.compared} of ${summary.lines} lines matched confidently`,
-    summary.uncomparable ? `${summary.uncomparable} unmatched` : null,
-    summary.failed ? `${summary.failed} lookups failed` : null,
+    `${summary.highConfidence ?? summary.confidenceTiers?.high?.compared ?? 0} high confidence`,
+    `${summary.mediumConfidence ?? summary.confidenceTiers?.medium?.compared ?? 0} medium confidence`,
+    `${summary.unmatched ?? summary.uncomparable ?? 0} unmatched`,
+    summary.failed ? `${summary.failed} lookup${summary.failed === 1 ? "" : "s"} failed` : null,
+    summary.truncated ? `${summary.truncated} truncated` : null,
   ].filter(Boolean);
 
   out.push(
@@ -676,6 +679,11 @@ export function renderComparison(result, { columns = 100, history = false, links
     "Prices are matched by name and pack size, so treat this as a guide;" +
       " lines marked ? are lower-confidence matches.",
   );
+  if (summary.truncated) {
+    out.push(
+      "Candidate retrieval was truncated; “best found” is not a global cheapest claim.",
+    );
+  }
   return out.join("\n");
 }
 

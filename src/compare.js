@@ -275,7 +275,10 @@ export function scoreCandidate(line, candidate) {
     sourceSemantics.variants.every((variant, index) =>
       variant === candidateSemantics.variants[index]
     );
-  const semanticMismatchReasons = organicRequirementMet ? [] : ["organic_mismatch"];
+  const semanticMismatchReasons = [
+    organicRequirementMet ? null : "organic_mismatch",
+    variantsMatch ? null : "variant_mismatch",
+  ].filter(Boolean);
 
   const nameScore = Math.max(
     similarity(line.name, candidate.name),
@@ -359,14 +362,44 @@ function compareCandidateRank(left, right) {
     compareRankText(left.name, right.name);
 }
 
-function candidateKey(candidate) {
-  return candidate.productId ??
-    `${candidate.store}|${candidate.name}|${candidate.pack?.base}|${candidate.pack?.amount}`;
+export const REJECTION_REASONS = [
+  "missing_price",
+  "unknown_pack",
+  "different_unit",
+  "low_similarity",
+  "variant_mismatch",
+  "organic_mismatch",
+  "same_store",
+];
+
+function emptyRejectionCounts() {
+  return Object.fromEntries(REJECTION_REASONS.map((reason) => [reason, 0]));
+}
+
+function rawCandidateKey(product) {
+  if (product?.product_id != null) return `id:${product.product_id}`;
+  return [
+    "fields",
+    product?.store_name ?? "",
+    product?.product_name ?? "",
+    product?.brand ?? "",
+    product?.amount ?? "",
+    product?.unit ?? "",
+  ].join("|");
+}
+
+function deduplicateProducts(products) {
+  const unique = new Map();
+  for (const product of products) {
+    const key = rawCandidateKey(product);
+    if (!unique.has(key)) unique.set(key, product);
+  }
+  return [...unique.values()];
 }
 
 /**
- * Looks each basket line up on goma.gg and reports the cheapest comparable
- * alternative outside nemlig.com.
+ * Looks each basket line up on goma.gg and reports the best comparable
+ * alternative found outside nemlig.com.
  */
 export async function compareBasket(basket, goma, {
   stores = null,
@@ -376,66 +409,104 @@ export async function compareBasket(basket, goma, {
 } = {}) {
   const lines = (basket?.Lines ?? []).map(describeBasketLine);
   const targetStores = stores?.length ? stores.filter((store) => store !== NEMLIG_STORE) : null;
+  const searchCache = new Map();
 
-  const rate = (line, products) => {
-    const scored = products
-      .map(describeCandidate)
-      .filter((candidate) => candidate.store !== NEMLIG_STORE && candidate.unitPrice != null)
-      .map((candidate) => ({ ...candidate, ...scoreCandidate(line, candidate) }));
+  const cachedSearch = (query, options) => {
+    const key = JSON.stringify([
+      query,
+      options.stores,
+      options.sort,
+      options.limit,
+      options.offset ?? 0,
+    ]);
+    if (!searchCache.has(key)) {
+      searchCache.set(key, Promise.resolve().then(() => goma.search(query, options)));
+    }
+    return searchCache.get(key);
+  };
+
+  const retrieveQuery = async (query, options) => {
+    const relevance = await cachedSearch(query, { ...options, sort: "relevance" });
+    const relevanceProducts = relevance?.products ?? [];
+    let total = Number(relevance?.total);
+    if (!Number.isFinite(total)) total = relevanceProducts.length;
+    const batches = [relevanceProducts];
+    let requestCount = 1;
+
+    if (total > relevanceProducts.length) {
+      const byPrice = await cachedSearch(query, { ...options, sort: "price-asc" });
+      const priceProducts = byPrice?.products ?? [];
+      const priceTotal = Number(byPrice?.total);
+      if (Number.isFinite(priceTotal)) total = Math.max(total, priceTotal);
+      batches.push(priceProducts);
+      requestCount += 1;
+    }
+
+    const products = deduplicateProducts(batches.flat());
     return {
-      eligible: scored
-        .filter((candidate) =>
-          candidate.semanticEligible &&
-          candidate.comparable &&
-          candidate.confidence !== "low"
-        )
-        .map((candidate) => addPurchaseEconomics(line, candidate)),
-      rejected: scored.filter((candidate) => !candidate.semanticEligible),
+      products,
+      requestCount,
+      truncated: total > products.length,
     };
+  };
+
+  const assess = (line, products) => {
+    const eligible = [];
+    const rejectedCounts = emptyRejectionCounts();
+    for (const product of products) {
+      const candidate = describeCandidate(product);
+      let reason = null;
+      if (candidate.store === NEMLIG_STORE) reason = "same_store";
+      else if (candidate.price == null || candidate.price <= 0) reason = "missing_price";
+      else if (!line.pack || !candidate.pack) reason = "unknown_pack";
+
+      const score = reason ? null : scoreCandidate(line, candidate);
+      if (!reason && !score.sameBase) reason = "different_unit";
+      else if (!reason && !score.semanticEligible) reason = score.rejectionReason;
+      else if (!reason && score.confidence === "low") reason = "low_similarity";
+
+      if (reason) {
+        rejectedCounts[reason] += 1;
+      } else {
+        eligible.push(addPurchaseEconomics(line, { ...candidate, ...score }));
+      }
+    }
+    return { eligible, rejectedCounts };
   };
 
   let done = 0;
   const results = await mapWithLimit(lines, concurrency, async (line) => {
     const options = { stores: targetStores, limit: candidatesPerLine };
     let rated = [];
-    let rejected = [];
+    let products = [];
+    let requestCount = 0;
+    let truncated = false;
     let error = null;
 
     try {
       // The product name alone gives the best recall: prefixing the brand
       // narrows goma.gg's similarity search hard (often to a single hit).
-      const byName = await goma.search(line.name, options);
-      const byNameRated = rate(line, byName.products);
-      rated = byNameRated.eligible;
-      rejected = byNameRated.rejected;
+      const byName = await retrieveQuery(line.name, options);
+      products = byName.products;
+      requestCount += byName.requestCount;
+      truncated ||= byName.truncated;
+      rated = assess(line, products).eligible;
 
       // Fall back to brand + name when the name alone found nothing solid;
       // for own-brand staples the brand is what disambiguates.
       if (line.brand && !rated.some((candidate) => candidate.confidence === "high")) {
-        const byBrand = await goma.search(`${line.brand} ${line.name}`.trim(), options);
-        const byBrandRated = rate(line, byBrand.products);
-        const seen = new Set(rated.map(candidateKey));
-        for (const candidate of byBrandRated.eligible) {
-          const key = candidateKey(candidate);
-          if (!seen.has(key)) {
-            seen.add(key);
-            rated.push(candidate);
-          }
-        }
-        const rejectedSeen = new Set(rejected.map(candidateKey));
-        for (const candidate of byBrandRated.rejected) {
-          const key = candidateKey(candidate);
-          if (!rejectedSeen.has(key)) {
-            rejectedSeen.add(key);
-            rejected.push(candidate);
-          }
-        }
+        const byBrand = await retrieveQuery(`${line.brand} ${line.name}`.trim(), options);
+        products = deduplicateProducts([...products, ...byBrand.products]);
+        requestCount += byBrand.requestCount;
+        truncated ||= byBrand.truncated;
       }
     } catch (cause) {
       error = cause.message;
     }
     onProgress?.(++done, lines.length);
 
+    const diagnostics = assess(line, products);
+    rated = diagnostics.eligible;
     rated.sort(compareCandidateRank);
     rated = rated.map((candidate, index) => ({
       ...candidate,
@@ -456,15 +527,28 @@ export async function compareBasket(basket, goma, {
       line,
       best,
       alternatives: rated.slice(0, 3),
-      rejected,
       cheaper,
       saving,
       normalizedSaving,
+      retrievalCount: products.length,
+      requestCount,
+      eligibleCount: rated.length,
+      rejectedCounts: diagnostics.rejectedCounts,
+      truncated,
       selectionReason: best?.confidence === "high"
         ? "high_confidence_preferred"
         : best
         ? "medium_confidence_fallback"
         : null,
+      winnerReason: error
+        ? "lookup_failed"
+        : best?.confidence === "high"
+        ? "high_confidence_preferred"
+        : best
+        ? "medium_confidence_fallback"
+        : products.length
+        ? "all_candidates_rejected"
+        : "no_results",
       error,
     };
   });
@@ -487,7 +571,11 @@ export async function compareBasket(basket, goma, {
       compared: compared.length,
       cheaperElsewhere: results.filter((row) => row.cheaper).length,
       uncomparable: results.filter((row) => !row.best).length,
+      unmatched: results.filter((row) => !row.best && !row.error).length,
       failed: results.filter((row) => row.error).length,
+      truncated: results.filter((row) => row.truncated).length,
+      highConfidence: confidenceTiers.high.compared,
+      mediumConfidence: confidenceTiers.medium.compared,
       estimatedSavings: savings,
       confidenceTiers,
       basketTotal: Number(basket?.TotalPrice) || null,

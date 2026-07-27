@@ -217,10 +217,17 @@ nemlig compare
 nemlig compare --store "REMA 1000" --json
 ```
 
-`compare` looks up every basket line and reports the cheapest comparable
-alternative outside nemlig.com. Because the two catalogues share no product
-IDs, lines are matched on name similarity and pack size:
+`compare` looks up every basket line and reports the best comparable
+alternative it finds outside nemlig.com. Because the two catalogues share no
+product IDs, lines are matched on name similarity and pack size:
 
+- Candidate retrieval is bounded: each unique query gets one relevance page
+  and, only when more results exist, one price-ascending page at the same
+  limit. If the product-name query finds no high-confidence match, one bounded
+  brand query is added. Identical searches share the same in-flight request.
+- Candidates are deduplicated by Goma product ID. Products without an ID use
+  store, name, brand, amount, and unit instead, so genuinely different pack
+  sizes remain available.
 - Prices are normalised to a base unit (g, ml, or piece), so a 375 g jar can be
   compared against a 800 g one.
 - Matches are rated `high`, `medium`, or `low`; only `high` and `medium` count
@@ -240,6 +247,9 @@ IDs, lines are matched on name similarity and pack size:
   mistaken for checkout cash.
 - A line whose pack size cannot be parsed is reported as unmatched rather than
   silently skipped.
+- JSON rows include aggregate rejection counts, retrieval and eligibility
+  counts, the winner reason, and whether retrieval was truncated. Rejection
+  counts use stable reasons rather than exposing every rejected product.
 
 ```text
 PRODUCT                           NEMLIG           BEST             STORE         SAVE
@@ -254,14 +264,16 @@ Matches:
 Basket total:      653,46 kr.
 Estimated saving:  79,42 kr.
 
-13 of 15 lines matched confidently · 2 unmatched
+10 high confidence · 3 medium confidence · 2 unmatched
 ```
 
 The `?` marks a medium-confidence match: the products are comparable per unit,
 but the pack is a different size or the name match is looser. The displayed
 saving accounts for whole packs; surplus product has no assigned value. Treat
-the total as a guide, not a quote. `--sort` accepts `relevance`, `price-asc`,
-`price-desc`, `discount`, `name-asc`, and `name-desc`.
+the total as a guide, not a quote. When the bounded search cannot retrieve all
+reported candidates, human output says `BEST FOUND` and explicitly avoids a
+global-cheapest claim. `--sort` accepts `relevance`, `price-asc`, `price-desc`,
+`discount`, `name-asc`, and `name-desc`.
 
 The Goma client accepts an explicit `labels` filter for callers that know a
 verified goma.gg label value, but comparison does not guess or enable an

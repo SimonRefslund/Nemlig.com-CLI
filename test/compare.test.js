@@ -128,9 +128,11 @@ test("fixture cases characterize current basket comparisons", async () => {
     assert.equal(row.best?.confidence ?? null, fixture.expectedCurrent.bestConfidence, fixture.id);
     assert.equal(row.cheaper, fixture.expectedCurrent.cheaper, fixture.id);
     assert.deepEqual(
-      row.rejected.map(({ rejectionReason }) => rejectionReason),
-      fixture.expectedCurrent.rejectionReasons ?? [],
-      `${fixture.id}: rejection reasons`,
+      Object.fromEntries(
+        Object.entries(row.rejectedCounts).filter(([, count]) => count > 0),
+      ),
+      fixture.expectedCurrent.rejectedCounts ?? {},
+      `${fixture.id}: rejection counts`,
     );
     assert.equal(
       row.saving.toFixed(2),
@@ -399,6 +401,227 @@ test("summary totals are split by selected confidence tier", async () => {
   });
 });
 
+test("a valid cheaper candidate from the bounded price pass can win", async () => {
+  const calls = [];
+  const source = {
+    Id: "price-pass",
+    Name: "Fusilli",
+    Brand: "",
+    Description: "500 g",
+    Quantity: 1,
+    Price: 20,
+  };
+  const product = (productId, store, price) => ({
+    product_id: productId,
+    store_name: store,
+    product_name: "Fusilli",
+    brand: "",
+    amount: 500,
+    unit: "g",
+    current_price: price,
+  });
+  const goma = {
+    async search(query, options) {
+      calls.push({ query, sort: options.sort, limit: options.limit });
+      return options.sort === "relevance"
+        ? { products: [product("relevant", "Fixture Market", 18)], total: 50 }
+        : { products: [product("cheap", "Fixture Supermarket", 8)], total: 50 };
+    },
+  };
+
+  const { rows, summary } = await compareBasket(
+    { TotalPrice: source.Price, Lines: [source] },
+    goma,
+  );
+
+  assert.deepEqual(calls, [
+    { query: "Fusilli", sort: "relevance", limit: 20 },
+    { query: "Fusilli", sort: "price-asc", limit: 20 },
+  ]);
+  assert.equal(rows[0].best.productId, "cheap");
+  assert.equal(rows[0].requestCount, 2);
+  assert.equal(rows[0].retrievalCount, 2);
+  assert.equal(rows[0].truncated, true);
+  assert.equal(summary.truncated, 1);
+});
+
+test("the price pass is skipped when relevance covered the result set", async () => {
+  const sorts = [];
+  const goma = {
+    async search(_query, options) {
+      sorts.push(options.sort);
+      return {
+        products: [{
+          product_id: "only",
+          store_name: "Fixture Market",
+          product_name: "Fusilli",
+          brand: "",
+          amount: 500,
+          unit: "g",
+          current_price: 8,
+        }],
+        total: 1,
+      };
+    },
+  };
+  const source = {
+    Id: "covered",
+    Name: "Fusilli",
+    Brand: "",
+    Description: "500 g",
+    Quantity: 1,
+    Price: 20,
+  };
+
+  const { rows } = await compareBasket(
+    { TotalPrice: source.Price, Lines: [source] },
+    goma,
+  );
+  assert.deepEqual(sorts, ["relevance"]);
+  assert.equal(rows[0].requestCount, 1);
+  assert.equal(rows[0].truncated, false);
+});
+
+test("candidate dedup uses IDs and preserves fallback pack sizes", async () => {
+  const duplicate = {
+    product_id: "same-id",
+    store_name: "Fixture Market",
+    product_name: "Penne",
+    brand: "Pastahuset",
+    amount: 500,
+    unit: "g",
+    current_price: 10,
+  };
+  const fallback = (amount, price) => ({
+    product_id: null,
+    store_name: "Fixture Supermarket",
+    product_name: "Penne",
+    brand: "Pastahuset",
+    amount,
+    unit: "g",
+    current_price: price,
+  });
+  const goma = {
+    async search(_query, options) {
+      return options.sort === "relevance"
+        ? { products: [duplicate, fallback(400, 8)], total: 3 }
+        : { products: [{ ...duplicate }, fallback(800, 14)], total: 3 };
+    },
+  };
+  const source = {
+    Id: "dedup",
+    Name: "Penne",
+    Brand: "",
+    Description: "500 g",
+    Quantity: 1,
+    Price: 20,
+  };
+
+  const { rows } = await compareBasket(
+    { TotalPrice: source.Price, Lines: [source] },
+    goma,
+  );
+
+  assert.equal(rows[0].retrievalCount, 3);
+  assert.equal(rows[0].eligibleCount, 3);
+  assert.deepEqual(
+    rows[0].alternatives.map((candidate) => candidate.pack.amount).sort((a, b) => a - b),
+    [400, 500, 800],
+  );
+  assert.equal(rows[0].truncated, false);
+});
+
+test("rejection diagnostics aggregate stable reason codes", async () => {
+  const candidate = (id, overrides = {}) => ({
+    product_id: id,
+    store_name: "Fixture Market",
+    product_name: "Mayonnaise øko.",
+    brand: "",
+    amount: 500,
+    unit: "g",
+    current_price: 10,
+    ...overrides,
+  });
+  const products = [
+    candidate("eligible"),
+    candidate("missing-price", { current_price: null }),
+    candidate("unknown-pack", { amount: null }),
+    candidate("different-unit", { unit: "ml" }),
+    candidate("low-similarity", { product_name: "Vaskepulver øko." }),
+    candidate("variant", { product_name: "Mayonnaise Light øko." }),
+    candidate("conventional", { product_name: "Mayonnaise" }),
+    candidate("same-store", { store_name: "Nemlig" }),
+  ];
+  const goma = {
+    async search() {
+      return { products, total: products.length };
+    },
+  };
+  const source = {
+    Id: "diagnostics",
+    Name: "Mayonnaise øko.",
+    Brand: "",
+    Description: "500 g",
+    Quantity: 1,
+    Price: 20,
+  };
+
+  const { rows } = await compareBasket(
+    { TotalPrice: source.Price, Lines: [source] },
+    goma,
+  );
+  const [row] = rows;
+
+  assert.equal(row.retrievalCount, 8);
+  assert.equal(row.eligibleCount, 1);
+  assert.deepEqual(row.rejectedCounts, {
+    missing_price: 1,
+    unknown_pack: 1,
+    different_unit: 1,
+    low_similarity: 1,
+    variant_mismatch: 1,
+    organic_mismatch: 1,
+    same_store: 1,
+  });
+  assert.equal(row.winnerReason, "high_confidence_preferred");
+  assert.equal(Object.hasOwn(row, "rejected"), false);
+});
+
+test("identical in-flight queries are memoized and each query stays bounded", async () => {
+  const calls = [];
+  const product = (id, price) => ({
+    product_id: id,
+    store_name: "Fixture Market",
+    product_name: "Fusilli",
+    brand: "",
+    amount: 500,
+    unit: "g",
+    current_price: price,
+  });
+  const goma = {
+    async search(query, options) {
+      calls.push(`${query}|${options.sort}`);
+      await new Promise((resolve) => setImmediate(resolve));
+      return options.sort === "relevance"
+        ? { products: [product("one", 12)], total: 2 }
+        : { products: [product("two", 8)], total: 2 };
+    },
+  };
+  const lines = [1, 2].map((id) => ({
+    Id: String(id),
+    Name: "Fusilli",
+    Brand: "",
+    Description: "500 g",
+    Quantity: 1,
+    Price: 20,
+  }));
+
+  const { rows } = await compareBasket({ TotalPrice: 40, Lines: lines }, goma);
+
+  assert.deepEqual(calls.sort(), ["Fusilli|price-asc", "Fusilli|relevance"]);
+  assert.deepEqual(rows.map(({ requestCount }) => requestCount), [2, 2]);
+});
+
 test("pack sizes are read from nemlig descriptions", () => {
   assert.deepEqual(parsePackSize("400 g / hele bønner"), { amount: 400, base: "g" });
   assert.deepEqual(parsePackSize("0,50 l / ex. pant"), { amount: 500, base: "ml" });
@@ -483,6 +706,8 @@ test("a variant word keeps a near-identical name out of high confidence", () => 
     name: "Mayonnaise Light", brand: "Graasten", pack: { amount: 375, base: "g" },
   });
   assert.equal(light.confidence, "medium");
+  assert.equal(light.semanticEligible, false);
+  assert.equal(light.rejectionReason, "variant_mismatch");
 
   const plain = scoreCandidate(mayonnaise, {
     name: "Mayonnaise", brand: "Graasten", pack: { amount: 375, base: "g" },

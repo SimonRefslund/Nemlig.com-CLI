@@ -93,6 +93,22 @@ test("search serializes explicit labels without guessing defaults", async () => 
   assert.deepEqual(bodies[1].p_labels_filter, ["verified-label"]);
 });
 
+test("price ordering preserves the search term and bounded limit", async () => {
+  let body;
+  const api = new GomaApi({
+    fetchImpl: async (_url, options) => {
+      body = JSON.parse(options.body);
+      return jsonResponse({ products: [] });
+    },
+  });
+
+  await api.search("fusilli", { sort: "price-asc", limit: 20 });
+
+  assert.equal(body.p_search_term, "fusilli");
+  assert.match(body.p_order_by_clause, /^current_price ASC/);
+  assert.equal(body.p_limit_val, 20);
+});
+
 test("an unknown sort key is rejected before any request", async () => {
   const api = new GomaApi({
     fetchImpl: async () => {

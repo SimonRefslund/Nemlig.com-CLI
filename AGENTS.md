@@ -162,9 +162,18 @@ kr overall and still have `IsMinTotalValid: false`.
               "cheaper": true, "saving": 11.42,
               "normalizedSaving": 11.42,
               "selectionReason": "high_confidence_preferred",
-              "alternatives": [], "rejected": [], "error": null } ],
+              "winnerReason": "high_confidence_preferred",
+              "retrievalCount": 24, "requestCount": 2, "eligibleCount": 8,
+              "rejectedCounts": {
+                "missing_price": 1, "unknown_pack": 2, "different_unit": 1,
+                "low_similarity": 10, "variant_mismatch": 1,
+                "organic_mismatch": 1, "same_store": 0
+              },
+              "truncated": true, "alternatives": [], "error": null } ],
   "summary": { "lines": 15, "compared": 13, "cheaperElsewhere": 6,
-               "uncomparable": 2, "failed": 0,
+               "uncomparable": 2, "unmatched": 2, "failed": 0,
+               "highConfidence": 10, "mediumConfidence": 3,
+               "truncated": 1,
                "estimatedSavings": 79.42,
                "confidenceTiers": {
                  "high": { "compared": 10, "cheaperElsewhere": 4,
@@ -182,7 +191,10 @@ compares that whole-pack outlay with the nemlig.com line total.
 `normalizedCostForRequiredAmount` and `normalizedSaving` retain exact-volume
 analysis, but must not be presented as checkout cash. `best` is `null` when
 nothing comparable was found. `confidenceTiers` splits selected matches and
-cash savings into high and medium totals.
+cash savings into high and medium totals. `retrievalCount` is the number of
+unique candidates evaluated, while `requestCount` is the number of bounded
+logical passes used for that row; memoization can make the actual shared
+network request count lower.
 
 `checkout status` — `readiness` is all booleans; check them before telling a
 user the order is ready.
@@ -246,8 +258,10 @@ similarity and pack size, then normalised to a price per gram/ml/piece.
 - Low-confidence matches are dropped entirely.
 - If a nemlig.com source explicitly contains `øko`, `økologisk`, or `organic`,
   the candidate name or brand must contain an organic marker too. Otherwise it
-  is rejected with `rejectionReason: "organic_mismatch"` and retained under
-  `rejected` for diagnostics. A conventional source adds no organic constraint.
+  contributes to `rejectedCounts.organic_mismatch`. A conventional source adds
+  no organic constraint.
+- Variant conflicts such as light versus non-light products contribute to
+  `rejectedCounts.variant_mismatch` and are not eligible to win.
 
 Only `high` and `medium` count toward `estimatedSavings`. A `medium` row often
 means a 375 g jar compared against an 800 g one: the per-kilo maths is right,
@@ -261,7 +275,22 @@ before medium, then lower whole-pack `purchaseCost`, higher matcher `score`,
 lower normalized `unitPrice`, and finally store and product name. A cheaper
 medium candidate remains in `alternatives` but cannot displace a high match.
 `selectionReason` reports whether high confidence was preferred or medium was
-used as a fallback.
+used as a fallback. `winnerReason` also explains unmatched and failed rows.
+
+Candidate discovery uses at most two pages per unique query: relevance first,
+then a price-ascending page only when Goma reports more results than the first
+page returned. A brand query gets the same bounded treatment only when the
+product-name query has no high-confidence candidate. Identical query/options
+pairs share one in-flight request. Candidates are deduplicated by product ID,
+or by store/name/brand/amount/unit when the ID is absent.
+
+Rows expose aggregate primary rejection counts only:
+`missing_price`, `unknown_pack`, `different_unit`, `low_similarity`,
+`variant_mismatch`, `organic_mismatch`, and `same_store`. `truncated: true`
+means Goma reported more results than the deduplicated bounded pages contained;
+human output then says `BEST FOUND` and must not describe the result as the
+global cheapest. Human summaries split high-confidence, medium-confidence,
+unmatched, failed, and truncated line counts.
 
 `GomaApi.search` accepts an optional `labels` array and serializes it to
 `p_labels_filter`; the default is `null`. The label vocabulary is undocumented,

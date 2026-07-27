@@ -6,6 +6,7 @@ import {
   minimumShortfall,
   renderBasket,
   renderCheckoutStatus,
+  renderComparison,
   renderDeliveryDays,
   renderOrders,
   renderProduct,
@@ -87,6 +88,47 @@ test("quantity campaigns are not applied below their threshold", () => {
     assert.match(output, /20,00\s*kr\. \(2 for 30,00\s*kr\.\)/);
     assert.doesNotMatch(output, /Price:\s+15,00\s*kr\./);
   }
+});
+
+test("truncated comparisons qualify best-found claims and split outcomes", () => {
+  const output = renderComparison({
+    rows: [{
+      line: {
+        name: "Fusilli",
+        unitPrice: 0.04,
+        pack: { amount: 500, base: "g" },
+      },
+      best: {
+        store: "Fixture",
+        name: "Fusilli",
+        unitPrice: 0.02,
+        pack: { amount: 500, base: "g" },
+        confidence: "high",
+      },
+      cheaper: true,
+      saving: 10,
+      truncated: true,
+    }],
+    summary: {
+      lines: 5,
+      compared: 2,
+      highConfidence: 1,
+      mediumConfidence: 1,
+      unmatched: 2,
+      failed: 1,
+      truncated: 1,
+      basketTotal: 100,
+      estimatedSavings: 10,
+    },
+  });
+
+  assert.match(output, /BEST FOUND/);
+  assert.match(output, /1 high confidence/);
+  assert.match(output, /1 medium confidence/);
+  assert.match(output, /2 unmatched/);
+  assert.match(output, /1 lookup failed/);
+  assert.match(output, /1 truncated/);
+  assert.match(output, /best found.+not a global cheapest claim/);
 });
 
 const basket = {
