@@ -17,6 +17,11 @@ export const VERDICTS = [
   { max: Infinity, key: "bad", label: "near its highest" },
 ];
 
+/** Product-policy threshold for assigning a price verdict. */
+export const MIN_HISTORY_DISTINCT_DATES = 30;
+/** Required elapsed calendar time from the first observation to the last. */
+export const MIN_HISTORY_SPAN_DAYS = 30;
+
 function verdictFor(percentCheaper) {
   return VERDICTS.find((verdict) => percentCheaper <= verdict.max);
 }
@@ -24,21 +29,50 @@ function verdictFor(percentCheaper) {
 const round = (value, places = 2) =>
   value == null || !Number.isFinite(value) ? null : Number(value.toFixed(places));
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function isoDay(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ""));
+  if (!match) return null;
+  const [, year, month, day] = match.map(Number);
+  const timestamp = Date.UTC(year, month - 1, day);
+  const date = new Date(timestamp);
+  if (date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day) {
+    return null;
+  }
+  return { date: `${match[1]}-${match[2]}-${match[3]}`, timestamp };
+}
+
 /**
  * @param price the price being judged. Defaults to the history's own current
  *   price, but `compare` passes a rival shop's price to ask the same question
  *   about it.
  */
 export function summarizePriceHistory(history, { price = null } = {}) {
-  const points = (history?.points ?? []).filter((point) =>
-    Number.isFinite(point.price)
-  );
-  const subject = price ?? history?.currentPrice ?? null;
+  const sorted = (history?.points ?? [])
+    .map((point) => ({ point, day: isoDay(point?.date) }))
+    .filter(({ point, day }) => day && Number.isFinite(point?.price))
+    .sort((left, right) => left.day.date.localeCompare(right.day.date));
+  const byDate = new Map();
+  for (const { point, day } of sorted) {
+    if (!byDate.has(day.date)) byDate.set(day.date, { ...point, date: day.date, day });
+  }
+  const points = [...byDate.values()];
+  const subjectValue = Number(price ?? history?.currentPrice);
+  const subject = Number.isFinite(subjectValue) ? subjectValue : null;
+  const spanDays = points.length > 1
+    ? (points.at(-1).day.timestamp - points[0].day.timestamp) / DAY_MS
+    : 0;
+  const sufficient = points.length >= MIN_HISTORY_DISTINCT_DATES &&
+    spanDays >= MIN_HISTORY_SPAN_DAYS;
 
-  if (!points.length || subject == null) {
+  if (!sufficient || subject == null) {
     return {
       productId: history?.productId ?? null,
-      days: 0,
+      days: points.length,
+      spanDays,
       price: subject,
       insufficientData: true,
     };
@@ -69,6 +103,7 @@ export function summarizePriceHistory(history, { price = null } = {}) {
   return {
     productId: history.productId,
     days: prices.length,
+    spanDays,
     price: round(subject),
     lowest: round(lowest),
     highest: round(highest),

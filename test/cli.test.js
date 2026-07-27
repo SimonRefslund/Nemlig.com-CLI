@@ -405,6 +405,74 @@ test("compare --links prints the goma.gg product URL for each cheaper alternativ
   assert.match(stdout.value, /https:\/\/goma\.gg\/product\/fusilli-lidl/);
 });
 
+test("compare --history fetches unique cheaper winners and preserves errors", async () => {
+  const stdout = outputBuffer();
+  const stderr = { write() {} };
+  const lines = ["Fusilli", "Penne", "Rigatoni", "Spaghetti"].map((name, index) => ({
+    Id: String(index + 1),
+    Name: name,
+    Brand: "",
+    Description: "500 g",
+    Quantity: 1,
+    Price: 10,
+  }));
+  const offers = {
+    Fusilli: { productId: "shared-id", price: 5 },
+    Penne: { productId: "shared-id", price: 4 },
+    Rigatoni: { productId: "not-cheaper-id", price: 12 },
+    Spaghetti: { productId: "error-id", price: 5 },
+  };
+  const historyCalls = [];
+  const api = {
+    async getBasket() {
+      return { TotalPrice: 40, Lines: lines };
+    },
+  };
+  const goma = {
+    async search(query) {
+      const offer = offers[query];
+      return {
+        products: [{
+          product_id: offer.productId,
+          store_name: "Fixture Market",
+          product_name: query,
+          brand: "",
+          amount: 500,
+          unit: "g",
+          current_price: offer.price,
+        }],
+        total: 1,
+        onSale: 0,
+      };
+    },
+    async priceHistory(productId) {
+      historyCalls.push(productId);
+      if (productId === "error-id") throw new Error("history unavailable");
+      return {
+        productId,
+        currentPrice: 6,
+        points: Array.from({ length: 31 }, (_, index) => ({
+          date: new Date(Date.UTC(2025, 0, 1 + index)).toISOString().slice(0, 10),
+          price: 6,
+          onSale: false,
+        })),
+      };
+    },
+  };
+
+  await run(["compare", "--history", "--json"], { api, goma, stdout, stderr });
+  const result = JSON.parse(stdout.value);
+  const byName = Object.fromEntries(result.rows.map((row) => [row.line.name, row]));
+
+  assert.deepEqual(historyCalls.sort(), ["error-id", "shared-id"]);
+  assert.equal(byName.Fusilli.best.history.productId, "shared-id");
+  assert.equal(byName.Penne.best.history.productId, "shared-id");
+  assert.equal(byName.Fusilli.best.history.insufficientData, false);
+  assert.equal(byName.Penne.best.history.insufficientData, false);
+  assert.equal(byName.Spaghetti.best.history.error, "history unavailable");
+  assert.equal(Object.hasOwn(byName.Rigatoni.best, "history"), false);
+});
+
 function historyApi(basketLines = []) {
   const written = [];
   return {

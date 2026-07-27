@@ -315,6 +315,16 @@ detail matters: a shelf price that holds steady at its high for most of the
 year has few strictly-cheaper days, and ranking on those alone would score a
 year-high price as a bargain.
 
+A verdict requires at least 30 distinct dated observations spanning at least
+30 calendar days. Thinner histories report `insufficientData`, `days`, and
+`spanDays` without calling the price good, normal, or bad. History points are
+sorted by their ISO calendar date before the low and last-cheaper dates are
+derived.
+
+For `compare --history`, only cheaper selected winners are checked. If several
+basket lines select the same goma.gg product, its history is fetched once and
+the result is attached to every applicable row.
+
 ## Environment
 
 | Variable | Effect |

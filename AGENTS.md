@@ -203,13 +203,16 @@ user the order is ready.
 
 ## Judging whether a price is good
 
-`nemlig goma history <query> --json` returns a year of daily prices plus a
-verdict. `compare --history` attaches the same verdict to each cheaper
-alternative under `rows[].best.history`, costing one extra request per match.
+`nemlig goma history <query> --json` returns a year of daily prices and, when
+the history is sufficient, a verdict. `compare --history` attaches the same
+analysis to each cheaper selected winner under `rows[].best.history`. Shared
+Goma product IDs are fetched once; matched rows that are not cheaper are not
+fetched.
 
 ```json
 { "product": { "product_id": "netto-81502000020-EA", "product_name": "Bl. 66 formalet kaffe" },
-  "summary": { "productId": "netto-81502000020-EA", "days": 365, "price": 66,
+  "summary": { "productId": "netto-81502000020-EA", "days": 365,
+               "spanDays": 364, "price": 66,
                "lowest": 39, "highest": 74.95, "average": 59.19,
                "lowestOn": "2025-11-22", "percentCheaper": 70, "percentile": 70,
                "cheaperDays": 255, "equalDays": 1, "daysOnSale": 118,
@@ -225,9 +228,12 @@ ties split. Use `percentile`, not `percentCheaper`, for any judgement: a price
 that sits at its yearly high for most of the year has few *strictly* cheaper
 days and would otherwise look like a bargain.
 
-Check `insufficientData` before reading any other field. **Being cheaper than
-nemlig.com and being a good price are different claims** — a rival shop can
-undercut nemlig.com today while sitting at its own yearly high. Report both.
+Check `insufficientData` before reading any verdict field. A verdict requires
+at least 30 distinct ISO calendar dates spanning at least 30 elapsed days.
+Insufficient results expose `days`, `spanDays`, and `insufficientData: true`
+but no good/normal/bad verdict. **Being cheaper than nemlig.com and being a good
+price are different claims** — a rival shop can undercut nemlig.com today
+while sitting at its own yearly high. Report both.
 
 ## How `compare` matches, and why the total is an estimate
 
