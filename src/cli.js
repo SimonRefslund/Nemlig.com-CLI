@@ -51,7 +51,7 @@ Usage:
                              [--limit <n>] [--offset <n>] [--json]
   nemlig goma stores
   nemlig goma history <query> [--store <name>] [--days <n>] [--json]
-  nemlig compare [--store <name>]... [--history] [--json]
+  nemlig compare [--store <name>]... [--history] [--links] [--json]
   nemlig habits [--orders <n>] [--min-orders <n>] [--limit <n>] [--json]
   nemlig reorder [--orders <n>] [--from <order-number>] [--yes] [--json]
   nemlig --help
@@ -88,7 +88,8 @@ reports the cheapest comparable alternative — it is a guide, not a quote.
 
 "goma history" shows a year of daily prices for a product, and "compare
 --history" says whether each cheaper price is actually a good one or just the
-shop's normal price.
+shop's normal price. "compare --links" prints the goma.gg product URL for each
+cheaper alternative so you can open it directly.
 
 "habits" reads your past orders and works out what you buy regularly and how
 often. "reorder" turns that into a basket, skipping anything already in it.
@@ -110,6 +111,7 @@ const FLAGS = {
   "--all": "all",
   "--sale": "sale",
   "--history": "history",
+  "--links": "links",
 };
 const NUMBERS = new Set(["--limit", "--offset", "--days", "--orders", "--min-orders"]);
 
@@ -147,6 +149,7 @@ export function parseArgs(argv) {
     "min-orders": 2,
     from: null,
     history: false,
+    links: false,
   };
   const positional = [];
   let optionsEnded = false;
@@ -620,6 +623,7 @@ export async function run(
       : renderComparison(result, {
         columns: stdout.columns ?? 100,
         history: options.history,
+        links: options.links,
       });
   } else if (command === "habits") {
     if (positional.length) throw new Error("habits accepts no arguments");

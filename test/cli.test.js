@@ -47,6 +47,7 @@ test("parseArgs supports multi-word searches and pagination", () => {
         "min-orders": 2,
         from: null,
         history: false,
+        links: false,
       },
       positional: ["økologisk", "mælk"],
     },
@@ -369,6 +370,39 @@ test("compare reports the cheaper alternative and the saving", async () => {
   assert.match(stdout.value, /Fusilli/);
   assert.match(stdout.value, /Lidl/);
   assert.match(stdout.value, /Estimated saving:\s+11,42/);
+});
+
+test("compare --links prints the goma.gg product URL for each cheaper alternative", async () => {
+  const stdout = outputBuffer();
+  const api = {
+    async getBasket() {
+      return {
+        TotalPrice: 34.74,
+        Lines: [{
+          Id: "1", Name: "Fusilli", Brand: "Garofalo", Description: "500 g",
+          Quantity: 1, Price: 17.37,
+        }],
+      };
+    },
+  };
+  const goma = {
+    async search() {
+      return {
+        products: [{
+          store_name: "Lidl", product_name: "Fusilli", brand: "Garofalo",
+          amount: 500, unit: "g", current_price: 5.95,
+          product_url: "https://goma.gg/product/fusilli-lidl",
+        }],
+        total: 1,
+        onSale: 0,
+      };
+    },
+  };
+
+  const stderr = { write() {} };
+  await run(["compare", "--links"], { api, goma, stdout, stderr });
+  assert.match(stdout.value, /Fusilli/);
+  assert.match(stdout.value, /https:\/\/goma\.gg\/product\/fusilli-lidl/);
 });
 
 function historyApi(basketLines = []) {
